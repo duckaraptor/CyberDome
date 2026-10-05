@@ -48,10 +48,10 @@ app.config.update({
 })
 
 keycloak_connection = KeycloakOpenIDConnection(
-                        server_url="http://localhost:8080/auth/",
+                        server_url=f"{KEYCLOAK_SERVER_URL}/",
                         username='admin',
                         password='admin',
-                        realm_name="myrealm",
+                        realm_name=KEYCLOAK_REALM,
                         user_realm_name="master",
                         client_id="admin-cli",
                         client_secret_key=KEYCLOAK_ADMIN_CLIENT_SECRET,
@@ -62,7 +62,7 @@ keycloak_admin = KeycloakAdmin(connection=keycloak_connection)
 oidc = OpenIDConnect(app)
 
 # Configure client using the python-kcloak library
-keycloak_openid = KeycloakOpenID(server_url="http://localhost:8080/auth/",
+keycloak_openid = KeycloakOpenID(server_url=f"{KEYCLOAK_SERVER_URL}/",
                                  client_id=KEYCLOAK_CLIENT_ID,
                                  realm_name=KEYCLOAK_REALM,
                                  client_secret_key=KEYCLOAK_CLIENT_SECRET)
@@ -112,6 +112,18 @@ def index():
         return redirect(url_for('home'))
     else:
         return render_template('index.html')
+
+
+def normalize_keycloak_user(user, current_user_id, current_user_role):
+    return {
+        'user_id': user.get('id'),
+        'username': user.get('username'),
+        'email': user.get('email'),
+        'created_timestamp': user.get('createdTimestamp'),
+        'email_verified': user.get('emailVerified', False),
+        'totp_enabled': user.get('totp', False),
+        'user_role': current_user_role if user.get('id') == current_user_id else None
+    }
     
 #create a route to revoke an access token and redirect to index.html page for the user to authenticate
 @app.route('/revokeToken')
@@ -151,7 +163,7 @@ def home():
                     user_id = auth_profile.get('sub')
                     #get the user role
                     user_roles = extract_user_role(oidc,keycloak_openid)
-                    user_role = user_roles[0]
+                    user_role = user_roles[0] if user_roles else None
 
                     #storing keycloak events
                     store_keycloak_events(keycloak_admin)
@@ -175,18 +187,10 @@ def home():
                     file_path = os.path.join(parent_directory, 'user_data.json')
 
                     # Extracting user data
-                    extracted_data = []
-                    for user in all_users:
-                        user_info = {
-                            'user_id': user['id'],
-                            'username': user['username'],
-                            'email': user['email'],
-                            'created_timestamp': user['createdTimestamp'],
-                            'email_verified': user['emailVerified'],
-                            'totp_enabled': user['totp'],
-                            'user_role': user_role if user['id'] == user_id else user.get('user_role') # Assign user role if IDs match
-                        }
-                        extracted_data.append(user_info)
+                    extracted_data = [
+                        normalize_keycloak_user(user, user_id, user_role)
+                        for user in all_users
+                    ]
 
                     # Load existing data from the file if it exists
                     existing_data = []

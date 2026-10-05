@@ -1,12 +1,12 @@
-#THis file contains the constants for the keycloak configurations
+import os
 
-# keycloak_config.py
-
-KEYCLOAK_SERVER_URL = "http://localhost:8080/auth"
-KEYCLOAK_REALM = "myrealm"
-KEYCLOAK_CLIENT_ID = "ZeroTrustPlatform"
-KEYCLOAK_CLIENT_SECRET = "MjxEIkuDnbL0ej2rJWv3qEV8TiI967qj"
-KEYCLOAK_ADMIN_CLIENT_SECRET = "nLpkVYMQ0cKCLv2VdZfFfwjxw9rcquNG"
+KEYCLOAK_SERVER_URL = os.getenv("KEYCLOAK_SERVER_URL", "http://localhost:8080/auth")
+KEYCLOAK_REALM = os.getenv("KEYCLOAK_REALM", "myrealm")
+KEYCLOAK_CLIENT_ID = os.getenv("KEYCLOAK_CLIENT_ID", "ZeroTrustPlatform")
+KEYCLOAK_CLIENT_SECRET = os.getenv(
+	"KEYCLOAK_CLIENT_SECRET", "MjxEIkuDnbL0ej2rJWv3qEV8TiI967qj"
+)
+KEYCLOAK_ADMIN_CLIENT_SECRET = os.getenv("KEYCLOAK_ADMIN_CLIENT_SECRET")
 
 SERVER_URL = f"{KEYCLOAK_SERVER_URL}/realms/{KEYCLOAK_REALM}/.well-known/openid-configuration"
 API_BASE_URL = f"{KEYCLOAK_SERVER_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect"

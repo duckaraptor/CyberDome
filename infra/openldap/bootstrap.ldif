@@ -1,0 +1,20 @@
+dn: ou=users,dc=leonet,dc=cns
+objectClass: organizationalUnit
+ou: users
+
+dn: uid=alice,ou=users,dc=leonet,dc=cns
+objectClass: inetOrgPerson
+cn: Alice Example
+sn: Example
+uid: alice
+mail: alice@example.com
+userPassword: alice
+
+dn: ou=groups,dc=leonet,dc=cns
+objectClass: organizationalUnit
+ou: groups
+
+dn: cn=Approver,ou=groups,dc=leonet,dc=cns
+objectClass: groupOfNames
+cn: Approver
+member: uid=alice,ou=users,dc=leonet,dc=cns

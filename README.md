@@ -1,6 +1,10 @@
 # Zero Trust Network Implementation
 
-The project aims to develop an implementation of zero trust architecture based on zero trust principles. It focuses on enhancing security by ensuring that no one, whether inside or outside the organization, is trusted by default. Instead, verification is required from anyone trying to access resources on the network.
+CyberDome is a local zero-trust access-control prototype. It combines OIDC authentication, LDAP-backed identities, contextual trust scoring, role-based policy thresholds, a peer-to-peer decision pipeline, and a Flask Web UI.
+
+See [How CyberDome Works](docs/how-it-works.md) for the architecture, authentication and access-decision flows, trust calculation, persisted state, and current prototype limitations.
+
+See the [Changelog](docs/changelog.md) for a dated record of implementation and setup changes.
 
 ## Project Overview
 
@@ -22,10 +26,59 @@ The project will utilize various technologies, including:
 
 ## Getting Started
 
-To get started with the project, follow these steps:
+### Local setup
 
-1. Clone the repository: `git clone https://github.com/LeoneOdinga/ZeroTrustArchitecture.git`
-2. Install dependencies and set up the required environment.
+Create a Python environment and install the application dependencies:
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+Start Colima if it is not already running, then start the local Postgres, OpenLDAP, phpLDAPadmin, and Keycloak services:
+
+```bash
+colima start
+docker context use colima
+docker compose up -d --build
+docker compose ps
+```
+
+The local development endpoints and credentials are:
+
+| Service | URL or address | Credentials |
+| --- | --- | --- |
+| Keycloak | `http://localhost:8080/auth` | `admin` / `admin` |
+| phpLDAPadmin | `http://localhost:8081` | `cn=admin,dc=leonet,dc=cns` / `admin_pass` |
+| LDAP | `ldap://localhost:389` | `cn=admin,dc=leonet,dc=cns` / `admin_pass` |
+| Web UI demo user | Keycloak login | `demo` / `demo` |
+| LDAP test user | Keycloak login | `alice` / `alice` |
+
+These credentials are for local development only. The imported `myrealm` realm contains the `ZeroTrustPlatform` client expected by the application. The `demo` user has the `Approver` client role. LDAP is configured as a Keycloak user federation provider; assign an application client role to LDAP users in Keycloak before using them in the Web UI.
+
+Start the Trust Engine, Policy Engine, and Access Proxy together:
+
+```bash
+./runAll.sh
+```
+
+In a second terminal, start the Web UI from its own directory:
+
+```bash
+source venv/bin/activate
+cd ZeroTrustWebUI
+python app.py
+```
+
+Open `http://localhost:5000`. Stop the Python services with `Ctrl+C`, then stop the identity stack with:
+
+```bash
+docker compose down
+```
+
+To delete all local identity data and recreate the seeded environment on the next start, use `docker compose down -v`.
 
 ## Contribution Guidelines
 

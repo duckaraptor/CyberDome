@@ -34,5 +34,23 @@
         "email_verified": true,
         "totp_enabled": false,
         "user_role": "Security Viewer"
+    },
+    {
+        "user_id": "64dcf9c2-278b-4d45-989b-06b8069ccbb0",
+        "username": "alice",
+        "email": "alice@example.com",
+        "created_timestamp": 1791212413707,
+        "email_verified": true,
+        "totp_enabled": false,
+        "user_role": null
+    },
+    {
+        "user_id": "e96fe68c-5ddd-444e-95bb-216dd14693b4",
+        "username": "demo",
+        "email": "demo@example.com",
+        "created_timestamp": null,
+        "email_verified": true,
+        "totp_enabled": false,
+        "user_role": "Approver"
     }
 ]
