@@ -14,6 +14,15 @@ This file records development changes made while preparing and running CyberDome
 ### Removed
 
 - Removed the unused 2023 `Keycloak/` and `OpenLDAP/` setups, replaced by `compose.yml` and `infra/`.
+- Stopped tracking runtime data: `access_requests.json`, `access_decision.json`, `auth_data.json`, `events.json`, `user_data.json`, and `ZeroTrustWebUI/instance/`. They are now git-ignored and recreated by the app.
+
+### Changed
+
+- `.gitignore` now covers runtime data, `.DS_Store`, `.env`, and `.venv/`, and fixes the editor-backup pattern (`*~`).
+
+### Fixed
+
+- `/logging` no longer crashes when `access_requests.json` doesn't exist yet.
 
 ## 2026-10-05
 

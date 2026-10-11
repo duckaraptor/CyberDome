@@ -384,10 +384,13 @@ def display_tokens():
 @app.route('/logging')
 def access_requests():
     file_path = os.path.join(os.path.dirname(os.getcwd()), 'access_requests.json')
-    
-    with open(file_path, 'r') as file:
-        access_requests_data = json.load(file)
-    
+    access_requests_data = []
+
+    # The file is created by the first access request
+    if os.path.exists(file_path):
+        with open(file_path, 'r') as file:
+            access_requests_data = json.load(file)
+
     return render_template('logging_and_monitoring.html', access_requests=access_requests_data)
 
 
