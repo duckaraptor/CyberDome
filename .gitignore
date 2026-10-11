@@ -5,3 +5,5 @@ venv/
 * ~
 *.swp
 __pycache__
+# Personal notes
+docs/notes.md

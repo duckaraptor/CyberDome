@@ -10,6 +10,30 @@ uid: alice
 mail: alice@example.com
 userPassword: alice
 
+dn: uid=bob,ou=users,dc=leonet,dc=cns
+objectClass: inetOrgPerson
+cn: Bob Example
+sn: Example
+uid: bob
+mail: bob@example.com
+userPassword: bob
+
+dn: uid=charlie,ou=users,dc=leonet,dc=cns
+objectClass: inetOrgPerson
+cn: Charlie Example
+sn: Example
+uid: charlie
+mail: charlie@example.com
+userPassword: charlie
+
+dn: uid=foo,ou=users,dc=leonet,dc=cns
+objectClass: inetOrgPerson
+cn: Foo Example
+sn: Example
+uid: foo
+mail: foo@example.com
+userPassword: foo
+
 dn: ou=groups,dc=leonet,dc=cns
 objectClass: organizationalUnit
 ou: groups
@@ -18,3 +42,18 @@ dn: cn=Approver,ou=groups,dc=leonet,dc=cns
 objectClass: groupOfNames
 cn: Approver
 member: uid=alice,ou=users,dc=leonet,dc=cns
+
+dn: cn=Researcher,ou=groups,dc=leonet,dc=cns
+objectClass: groupOfNames
+cn: Researcher
+member: uid=bob,ou=users,dc=leonet,dc=cns
+
+dn: cn=Administrator,ou=groups,dc=leonet,dc=cns
+objectClass: groupOfNames
+cn: Administrator
+member: uid=charlie,ou=users,dc=leonet,dc=cns
+
+dn: cn=Policy Administrator,ou=groups,dc=leonet,dc=cns
+objectClass: groupOfNames
+cn: Policy Administrator
+member: uid=foo,ou=users,dc=leonet,dc=cns

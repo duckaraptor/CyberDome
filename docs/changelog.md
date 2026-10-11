@@ -2,6 +2,19 @@
 
 This file records development changes made while preparing and running CyberDome locally. Runtime-generated data is listed separately from intentional source and configuration changes.
 
+## 2026-10-11
+
+### Added
+
+- Added LDAP users `bob`, `charlie`, and `foo` to `infra/openldap/bootstrap.ldif`, with `Researcher`, `Administrator`, and `Policy Administrator` LDAP groups.
+- Added `Researcher` and `Administrator` client roles to `infra/keycloak/myrealm-realm.json`.
+- Added the `app roles` LDAP role mapper, which maps LDAP groups in `ou=groups` to `ZeroTrustPlatform` client roles of the same name.
+- Added `docs/managing-users.md`.
+
+### Removed
+
+- Removed the unused 2023 `Keycloak/` and `OpenLDAP/` setups, replaced by `compose.yml` and `infra/`.
+
 ## 2026-10-05
 
 ### Added

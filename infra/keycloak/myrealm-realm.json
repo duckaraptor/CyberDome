@@ -37,7 +37,13 @@
           "name": "Security Viewer"
         },
         {
+          "name": "Researcher"
+        },
+        {
           "name": "Policy Administrator"
+        },
+        {
+          "name": "Administrator"
         }
       ]
     }
@@ -141,6 +147,23 @@
                 "read.only": ["true"],
                 "always.read.value.from.ldap": ["true"],
                 "is.mandatory.in.ldap": ["false"]
+              }
+            },
+            {
+              "name": "app roles",
+              "providerId": "role-ldap-mapper",
+              "subComponents": {},
+              "config": {
+                "roles.dn": ["ou=groups,dc=leonet,dc=cns"],
+                "role.name.ldap.attribute": ["cn"],
+                "role.object.classes": ["groupOfNames"],
+                "membership.ldap.attribute": ["member"],
+                "membership.attribute.type": ["DN"],
+                "membership.user.ldap.attribute": ["uid"],
+                "user.roles.retrieve.strategy": ["LOAD_ROLES_BY_MEMBER_ATTRIBUTE"],
+                "mode": ["READ_ONLY"],
+                "use.realm.roles.mapping": ["false"],
+                "client.id": ["ZeroTrustPlatform"]
               }
             }
           ]

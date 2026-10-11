@@ -4,6 +4,8 @@ CyberDome is a local zero-trust access-control prototype. It combines OIDC authe
 
 See [How CyberDome Works](docs/how-it-works.md) for the architecture, authentication and access-decision flows, trust calculation, persisted state, and current prototype limitations.
 
+See [Managing Users And Roles](docs/managing-users.md) for adding LDAP and Keycloak users, mapping LDAP groups to application roles, and verifying them.
+
 See the [Changelog](docs/changelog.md) for a dated record of implementation and setup changes.
 
 ## Project Overview
