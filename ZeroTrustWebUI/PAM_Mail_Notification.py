@@ -1,7 +1,9 @@
 import smtplib
 import ssl
 from email.message import EmailMessage
-from email_constants import email_sender,email_password,subject
+from cyberdome.settings import PAM_EMAIL_PASSWORD, PAM_EMAIL_SENDER
+
+subject = "Privileged Access Management (PAM) Request Approval"
 
 def send_email(email_sender, email_password, email_receiver, subject, body):
     try:
@@ -38,8 +40,12 @@ Secret Share:  {secret_share}
                     
 Please copy the secret share and use it to approve the PAM request via this link: <a href="http://localhost:5000/testing">Approve PAM request</a>"""
         
+    if not (PAM_EMAIL_SENDER and PAM_EMAIL_PASSWORD):
+        print(f"PAM email not sent to {approver_email}: set PAM_EMAIL_SENDER and PAM_EMAIL_PASSWORD to enable it.")
+        return
+
     # Send the email with the body to this approver
-    send_email(email_sender,email_password,approver_email,subject,body)
+    send_email(PAM_EMAIL_SENDER,PAM_EMAIL_PASSWORD,approver_email,subject,body)
 
 
         

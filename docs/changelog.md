@@ -4,6 +4,22 @@ This file records the changes we make to CyberDome, newest first. For each fix w
 
 ## 2026-10-13
 
+### Changed: Web UI secrets moved to `.env`
+
+**Why:** Secrets were written in the code: the Keycloak client secret (`keycloak_config.py` and `client_secrets.json`), the Keycloak admin password and the Flask session key (`app.py`), and a real Gmail app password belonging to the original author (`email_constants.py`).
+
+**What we changed:**
+
+- Added `cyberdome/settings.py`. It reads `.env` from the repo root if it exists, then takes every setting from environment variables. Variables already set in the environment win over the file.
+- Secrets have no default in the code. If `KEYCLOAK_CLIENT_SECRET`, `KEYCLOAK_ADMIN_PASSWORD` or `FLASK_SECRET_KEY` is missing, the Web UI stops at startup with a message that names it.
+- Non-secret settings (Keycloak URL, realm, client ID, admin username) keep their old values as defaults.
+- `app.py` builds the Flask-OIDC client settings in code, so `ZeroTrustWebUI/client_secrets.json` is deleted. The Web UI no longer depends on the folder it starts from.
+- `keycloak_config.py` only builds the Keycloak URLs from the settings.
+- The PAM approval email reads `PAM_EMAIL_SENDER` and `PAM_EMAIL_PASSWORD`. Without them, it skips the email and prints why. `ZeroTrustWebUI/email_constants.py` is deleted.
+- Added `.env.example` with every variable, and a setup step in the README.
+- We tested that the Web UI stops with a clear message without the secrets, and that with them it loads all 25 routes, logs in to the Keycloak admin API, and reaches the client configuration, even when started from another folder. We also tested the `.env` reader with comments, quotes, spaces and invalid lines.
+- Not covered yet: the identity stack's local passwords in `compose.yml` and `infra/`.
+
 ### Changed: removed dead code
 
 **Why:** Unused imports, unused variables and commented-out code make the files harder to read, and hide which code actually matters.

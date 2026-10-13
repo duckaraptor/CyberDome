@@ -1,16 +1,18 @@
-import os
+'''
 
-KEYCLOAK_SERVER_URL = os.getenv("KEYCLOAK_SERVER_URL", "http://localhost:8080/auth")
-KEYCLOAK_REALM = os.getenv("KEYCLOAK_REALM", "myrealm")
-KEYCLOAK_CLIENT_ID = os.getenv("KEYCLOAK_CLIENT_ID", "ZeroTrustPlatform")
-KEYCLOAK_CLIENT_SECRET = os.getenv(
-	"KEYCLOAK_CLIENT_SECRET", "MjxEIkuDnbL0ej2rJWv3qEV8TiI967qj"
-)
-KEYCLOAK_ADMIN_CLIENT_SECRET = os.getenv("KEYCLOAK_ADMIN_CLIENT_SECRET")
+Keycloak URLs for the Web UI. The values themselves (server, realm, client ID and
+secret) come from cyberdome/settings.py, which reads them from the environment.
 
-SERVER_URL = f"{KEYCLOAK_SERVER_URL}/realms/{KEYCLOAK_REALM}/.well-known/openid-configuration"
-API_BASE_URL = f"{KEYCLOAK_SERVER_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect"
+'''
+from cyberdome.settings import (KEYCLOAK_ADMIN_CLIENT_SECRET, KEYCLOAK_CLIENT_ID, KEYCLOAK_CLIENT_SECRET,
+                                KEYCLOAK_REALM, KEYCLOAK_SERVER_URL)
+
+ISSUER_URL = f"{KEYCLOAK_SERVER_URL}/realms/{KEYCLOAK_REALM}"
+SERVER_URL = f"{ISSUER_URL}/.well-known/openid-configuration"
+API_BASE_URL = f"{ISSUER_URL}/protocol/openid-connect"
 AUTHORIZATION_URL = f"{API_BASE_URL}/auth"
 REGISTRATION_URL = f"{API_BASE_URL}/registrations"
 TOKEN_URL = f"{API_BASE_URL}/token"
+USERINFO_URL = f"{API_BASE_URL}/userinfo"
+INTROSPECTION_URL = f"{API_BASE_URL}/token/introspect"
 REVOCATION_URL = f"{API_BASE_URL}/logout"

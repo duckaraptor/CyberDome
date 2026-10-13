@@ -37,6 +37,14 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
+Create your settings file from the template, then fill in the values. The comments in the file explain each one:
+
+```bash
+cp .env.example .env
+```
+
+`.env` holds secrets and is git-ignored. The Web UI reads it at startup (see `cyberdome/settings.py`) and stops with a clear message if a required value is missing.
+
 Start Colima if it is not already running, then start the local Postgres, OpenLDAP, phpLDAPadmin, and Keycloak services:
 
 ```bash

@@ -159,7 +159,7 @@ Most JSON and SQLite state files below are created or updated at runtime after t
 
 `scripts/runAll.sh` starts the Trust Engine, Policy Engine, and Access Proxy in dependency order. It checks ports `8001` through `8003`, monitors its child processes, and stops all three on `Ctrl+C`.
 
-All data paths come from `cyberdome/data_paths.py` and are built from the code's location, so they don't depend on the folder a process starts in. The Web UI still has to start from `ZeroTrustWebUI`, because Flask-OIDC reads `client_secrets.json` from the current folder. `scripts/runWebUI.sh` does that for you.
+All data paths come from `cyberdome/data_paths.py` and are built from the code's location, so they don't depend on the folder a process starts in. Settings and secrets for the Web UI (Keycloak client secret, Keycloak admin login, Flask session key, optional PAM email account) come from environment variables, read by `cyberdome/settings.py`. It first loads `.env` from the repo root if it exists. `.env` is git-ignored, and `.env.example` lists every variable.
 
 ## Identity Bootstrap
 
@@ -188,7 +188,7 @@ This command destroys all local identity data.
 - Each request starts node 4 on port `8004`, so two simultaneous access requests clash on that port.
 - Trust scoring expects complete identity, authentication, and request records plus a numeric account timestamp.
 - Users without a recognized client role are not explicitly denied by current role-threshold logic.
-- Local secrets and email credentials are stored in source files and must be replaced outside local development.
+- The Web UI's secrets come from `.env`, but the identity stack's local passwords are still in `compose.yml` and `infra/` (Postgres, LDAP admin, Keycloak admin, and the seeded users). The `ZeroTrustPlatform` client secret is also in `infra/keycloak/myrealm-realm.json`, and `KEYCLOAK_CLIENT_SECRET` must match it.
 - Flask debug mode and Keycloak development mode are enabled.
 
 ## Troubleshooting
@@ -233,4 +233,5 @@ Verify that the user has an application client role and matching records in `dat
 | `ZeroTrustWebUI/app.py` | Flask routes and application workflows |
 | `cyberdome/trust_algorithm.py` | Trust-score calculations |
 | `cyberdome/data_paths.py` | Locations of the shared data and config files |
+| `cyberdome/settings.py` | Settings and secrets from environment variables and `.env` |
 | `cyberdome/trust_signals.py` | Event processing and JSON lookups |

@@ -19,8 +19,10 @@ from cyberdome.networking import WebUINode
 from keycloak import KeycloakAdmin
 from keycloak import KeycloakOpenIDConnection
 import re, uuid
-from keycloak_config import (KEYCLOAK_ADMIN_CLIENT_SECRET, KEYCLOAK_CLIENT_ID, KEYCLOAK_CLIENT_SECRET,
-                             KEYCLOAK_REALM, KEYCLOAK_SERVER_URL, REVOCATION_URL)
+from cyberdome.settings import KEYCLOAK_ADMIN_USERNAME, require
+from keycloak_config import (INTROSPECTION_URL, ISSUER_URL, KEYCLOAK_ADMIN_CLIENT_SECRET, KEYCLOAK_CLIENT_ID,
+                             KEYCLOAK_CLIENT_SECRET, KEYCLOAK_REALM, KEYCLOAK_SERVER_URL, AUTHORIZATION_URL,
+                             REVOCATION_URL, TOKEN_URL, USERINFO_URL)
 from PAM import PAM
 from Keycloak_functions import (extract_user_role, get_client_role_members_emails, get_location, get_mac_details,
                                 get_public_ip, get_user_id_by_email, revoke_token, token_is_valid)
@@ -38,14 +40,29 @@ This section below contains the configuration of the flask OIDC and the keycloak
 
 app.config['OIDC_SESSION_TYPE'] = 'null'
 
+# Flask-OIDC client settings (previously client_secrets.json), built from cyberdome/settings.py
+OIDC_CLIENT_SETTINGS = {
+    'web': {
+        'issuer': ISSUER_URL,
+        'auth_uri': AUTHORIZATION_URL,
+        'client_id': KEYCLOAK_CLIENT_ID,
+        'client_secret': require('KEYCLOAK_CLIENT_SECRET'),
+        'redirect_uris': ['http://localhost:5000/login'],
+        'userinfo_uri': USERINFO_URL,
+        'token_uri': TOKEN_URL,
+        'token_introspection_uri': INTROSPECTION_URL,
+    }
+}
+
+
 app.config.update({
-    'SECRET_KEY': 'bzf9bctfGor9tB2rOfLdQnK3VNDxt6rx',
+    'SECRET_KEY': require('FLASK_SECRET_KEY'),
     'TESTING': True,
     'DEBUG': True,
-    'OIDC_CLIENT_SECRETS': 'client_secrets.json',
+    'OIDC_CLIENT_SECRETS': OIDC_CLIENT_SETTINGS,
     'OIDC_ID_TOKEN_COOKIE_SECURE': False,
     'OIDC_USER_INFO_ENABLED': True,
-    'OIDC_OPENID_REALM': 'myrealm',
+    'OIDC_OPENID_REALM': KEYCLOAK_REALM,
     'OIDC_SCOPES': ['openid', 'email', 'profile'],
     'OIDC_TOKEN_TYPE_HINT': 'access_token',
     'OIDC_INTROSPECTION_AUTH_METHOD': 'client_secret_post'
@@ -53,8 +70,8 @@ app.config.update({
 
 keycloak_connection = KeycloakOpenIDConnection(
                         server_url=f"{KEYCLOAK_SERVER_URL}/",
-                        username='admin',
-                        password='admin',
+                        username=KEYCLOAK_ADMIN_USERNAME,
+                        password=require('KEYCLOAK_ADMIN_PASSWORD'),
                         realm_name=KEYCLOAK_REALM,
                         user_realm_name="master",
                         client_id="admin-cli",
