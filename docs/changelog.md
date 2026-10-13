@@ -4,6 +4,18 @@ This file records the changes we make to CyberDome, newest first. For each fix w
 
 ## 2026-10-13
 
+### Changed: policy rules moved to `cyberdome/policy.py`
+
+**Why:** The Policy Engine's rules (`make_access_decision`) were a method inside the network class in `Networking.py`, next to the message handling. Section 3.4 of the assignment needs at least five explicit policies, so the rules need a place of their own that is easy to read, test and extend.
+
+**What we changed:**
+
+- Moved `make_access_decision` from `Networking.py` to `cyberdome/policy.py` as a plain function. The rules are the same.
+- Added `load_policy_configuration`, which reads `policyConfiguration.yml` on every call, like before.
+- `make_access_decision` can take the configuration as an optional argument. Tests can use this instead of changing the file.
+- Removed the `yaml` and `POLICY_CONFIG_FILE` imports from `Networking.py`. Only the moved method used them.
+- We compared the old method and the new function on 2,772 combinations of role (including unknown roles and no role), trust score and sign-in value. They gave the same verdict every time.
+
 ### Changed: shared code moved into a `cyberdome/` package
 
 **Why:** The trust score and the data helpers are used by both the engines and the Web UI, but they lived inside `ZeroTrustWebUI/`. The engines had to import them as `ZeroTrustWebUI.TrustAlgorithm`, and the Web UI imported the same files a different way, which needed a try/except import.

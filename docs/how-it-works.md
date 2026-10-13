@@ -223,7 +223,8 @@ Verify that the user has an application client role and matching records in `dat
 | `AccessProxy.py` | Access Proxy process, node 1 |
 | `TrustEngine.py` | Trust Engine process, node 2 |
 | `PolicyEngine.py` | Policy Engine process, node 3 |
-| `Networking.py` | Peer routing, scoring dispatch, and policy decisions |
+| `Networking.py` | Peer routing and scoring dispatch |
+| `cyberdome/policy.py` | Policy rules: role thresholds and the sign-in check |
 | `scripts/` | Launchers: `runAll.sh` for the three engines, `runWebUI.sh` for the Web UI, and one script per engine |
 | `tests/` | Manual check scripts: `test.py` prints one user's trust score, `testAP.py` runs a stand-alone Access Proxy |
 | `compose.yml` | Local identity and database stack |

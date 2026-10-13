@@ -10,10 +10,10 @@ import json
 import os
 import traceback
 from p2pnetwork.node import Node
-import yaml
 import cyberdome.trust_algorithm as ta
+from cyberdome.policy import make_access_decision
 from cyberdome.trust_signals import get_latest_access_request, get_latest_auth_data, get_user_identity_data_by_id
-from cyberdome.data_paths import ACCESS_DECISIONS_FILE, ACCESS_REQUESTS_FILE, AUTH_DATA_FILE, POLICY_CONFIG_FILE, USER_DATA_FILE
+from cyberdome.data_paths import ACCESS_DECISIONS_FILE, ACCESS_REQUESTS_FILE, AUTH_DATA_FILE, USER_DATA_FILE
 
 class Networking(Node):
     #Define a dictionary of the node roles based on their node.id attributes
@@ -83,33 +83,6 @@ class Networking(Node):
                 'user_trust_score': user_trust_score
             }
             self.send_message_to_node('3',data)
-    def make_access_decision(self,user_role, user_trust_score, sign_in_risk):
-    # Load policy configuration data from YAML file
-        with open(POLICY_CONFIG_FILE, 'r') as file:
-            policy_configuration = yaml.safe_load(file)
-
-        # Access specific values from the policy configuration
-        admin_threshold = float(policy_configuration['adminThreshold'])
-        approver_threshold = float(policy_configuration['approverThreshold'])
-        security_viewer_threshold = float(policy_configuration['securityViewerThreshold'])
-        sign_in_risk_threshold = float(policy_configuration['signInRiskThreshold'])
-
-        # Initialize verdict
-        verdict = 1
-
-        # Determine access decision based on user trust score and role-specific thresholds
-        if user_role == 'Approver' and user_trust_score < approver_threshold:
-            verdict = 0
-        elif user_role == 'Security Viewer' and user_trust_score < security_viewer_threshold:
-            verdict = 0
-        elif user_role == 'Policy Administrator' and user_trust_score < admin_threshold:
-            verdict = 0
-
-        # Determine access decision based on sign-in risk threshold
-        if sign_in_risk < sign_in_risk_threshold:
-            verdict = 0
-
-        return verdict
 
 
     def process_message_from_trust_engine(self, sender, message):
@@ -171,7 +144,7 @@ class Networking(Node):
                 new_id = 1
 
             # Call the access decision script /function here to return the verdict
-            verdict = self.make_access_decision(user_role,user_trust_score,sign_in_risk)
+            verdict = make_access_decision(user_role,user_trust_score,sign_in_risk)
 
             print(f"Policy Engine Verdict: {verdict}")
              # Prepare the access decision data
