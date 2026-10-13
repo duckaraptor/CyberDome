@@ -220,9 +220,9 @@ Verify that the user has an application client role and matching records in `dat
 
 | Path | Purpose |
 | --- | --- |
-| `AccessProxy.py` | Access Proxy process, node 1 |
-| `TrustEngine.py` | Trust Engine process, node 2 |
-| `PolicyEngine.py` | Policy Engine process, node 3 |
+| `engines/access_proxy.py` | Access Proxy process, node 1 |
+| `engines/trust_engine.py` | Trust Engine process, node 2 |
+| `engines/policy_engine.py` | Policy Engine process, node 3 |
 | `cyberdome/networking.py` | Peer-to-peer nodes: a `Networking` base class plus `AccessProxyNode`, `TrustEngineNode`, `PolicyEngineNode` and `WebUINode` |
 | `cyberdome/policy.py` | Policy rules: role thresholds and the sign-in check |
 | `scripts/` | Launchers: `runAll.sh` for the three engines, `runWebUI.sh` for the Web UI, and one script per engine |

@@ -41,17 +41,17 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 echo "Starting Trust Engine..."
-"$PYTHON_BIN" -u TrustEngine.py &
+"$PYTHON_BIN" -u engines/trust_engine.py &
 PIDS+=("$!")
 sleep 1
 
 echo "Starting Policy Engine..."
-"$PYTHON_BIN" -u PolicyEngine.py &
+"$PYTHON_BIN" -u engines/policy_engine.py &
 PIDS+=("$!")
 sleep 1
 
 echo "Starting Access Proxy..."
-"$PYTHON_BIN" -u AccessProxy.py &
+"$PYTHON_BIN" -u engines/access_proxy.py &
 PIDS+=("$!")
 
 echo "All engines started. Press Ctrl+C to stop them."

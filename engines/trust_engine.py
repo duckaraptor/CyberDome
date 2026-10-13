@@ -1,8 +1,10 @@
+import os
 import signal
 import sys
 from threading import Event
 
-sys.path.insert(0, '..') # Import the files where the modules are located
+# Make the repo root importable (for the shared cyberdome package), wherever this script is started from
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from cyberdome.networking import TrustEngineNode
 

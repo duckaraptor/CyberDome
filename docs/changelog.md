@@ -4,6 +4,19 @@ This file records the changes we make to CyberDome, newest first. For each fix w
 
 ## 2026-10-13
 
+### Changed: engine launchers moved to `engines/`, leftovers removed
+
+**Why:** The repo root mixed the engine launchers, an old copy of the Access Proxy and an empty `__init__.py` with the project files.
+
+**What we changed:**
+
+- Moved the launchers to `engines/` and renamed them to `snake_case`: `AccessProxy.py` → `engines/access_proxy.py`, `TrustEngine.py` → `engines/trust_engine.py`, `PolicyEngine.py` → `engines/policy_engine.py`.
+- The launchers add the repo root to Python's import path from their own location. The old `sys.path.insert(0, '..')` depended on the start folder.
+- `scripts/runAll.sh` and the per-engine scripts start the new paths.
+- Deleted `node1.py`, an old copy of the Access Proxy launcher.
+- Deleted the empty root `__init__.py`. Nothing imports the repo root as a package anymore.
+- We ran alice's request through the engines started by `scripts/runAll.sh` again. The Web UI got the verdict for that request, with the same score and verdict as before.
+
 ### Changed: one node base class with a subclass per node
 
 **Why:** There were two node classes. `Networking.py` in the root was used by all three engines, and `ZeroTrustWebUI/Networking.py` was an older, smaller copy used by the Web UI. Every engine carried the handlers of every other engine and worked out its job from who sent the message. The two copies had already drifted apart.
