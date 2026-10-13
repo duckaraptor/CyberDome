@@ -4,6 +4,20 @@ This file records the changes we make to CyberDome, newest first. For each fix w
 
 ## 2026-10-13
 
+### Changed: `app.py` split into blueprints
+
+**Why:** `web/app.py` was about 680 lines with every page in one file. Section 3.1 of the assignment needs role checks on the pages, which is easier when each area has its own file.
+
+**What we changed:**
+
+- `web/app.py` now only creates the app, loads its settings, connects the shared objects and registers the pages (about 70 lines).
+- `web/extensions.py` creates the shared objects without an app: `oidc`, `db`, `keycloak_admin` and `keycloak_openid`. `app.py` connects them with `init_app`. This way the page files can import them without importing `app.py`, which would be a circular import.
+- `web/models.py` holds the PAM database tables.
+- `web/routes/` holds the pages, one Flask blueprint per area: `auth`, `access`, `resources`, `policy_config`, `monitoring` and `privileged_access`. The route code is unchanged.
+- `url_for` calls use the blueprint names, for example `auth.home`. Templates only link by path, so they didn't change.
+- Kept as they were, to be fixed with the role checks: `/testing` and `/viewAccessRequests` have `require_login` above `route`, so they have no login check. They are marked with a comment.
+- Before the change we recorded how all 26 routes answer a visitor who isn't logged in, using Flask's test client on a copy of the app. After the change, all 26 answered the same: same status codes and redirects. We also checked that every `url_for` target exists and that no name is undefined.
+
 ### Changed: consistent names in the Web UI
 
 **Why:** The Web UI mixed naming styles (`Keycloak_functions.py`, `PAM_Mail_Notification.py`, `apprPage.html`), and one template had spaces in its name (`Fintech Access Tokens.html`).

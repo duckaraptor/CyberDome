@@ -230,7 +230,10 @@ Verify that the user has an application client role and matching records in `dat
 | `compose.yml` | Local identity and database stack |
 | `infra/keycloak/` | Seeded Keycloak realm |
 | `infra/openldap/` | OpenLDAP image and seed LDIF |
-| `web/app.py` | Flask routes and application workflows |
+| `web/app.py` | Creates the Flask app, loads its settings and registers the pages |
+| `web/extensions.py` | Shared objects: login (`oidc`), the PAM database (`db`) and the Keycloak clients |
+| `web/models.py` | PAM database tables (`AccessRequest`, `Approver`) |
+| `web/routes/` | The pages, one blueprint per area: `auth`, `access`, `resources`, `policy_config`, `monitoring`, `privileged_access` |
 | `cyberdome/trust_algorithm.py` | Trust-score calculations |
 | `cyberdome/data_paths.py` | Locations of the shared data and config files |
 | `cyberdome/settings.py` | Settings and secrets from environment variables and `.env` |
