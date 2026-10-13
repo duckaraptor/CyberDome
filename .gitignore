@@ -11,7 +11,7 @@ __pycache__
 
 # Runtime data written by the app and engines
 /data/
-ZeroTrustWebUI/instance/
+web/instance/
 
 
 /notes/

@@ -230,7 +230,7 @@ Verify that the user has an application client role and matching records in `dat
 | `compose.yml` | Local identity and database stack |
 | `infra/keycloak/` | Seeded Keycloak realm |
 | `infra/openldap/` | OpenLDAP image and seed LDIF |
-| `ZeroTrustWebUI/app.py` | Flask routes and application workflows |
+| `web/app.py` | Flask routes and application workflows |
 | `cyberdome/trust_algorithm.py` | Trust-score calculations |
 | `cyberdome/data_paths.py` | Locations of the shared data and config files |
 | `cyberdome/settings.py` | Settings and secrets from environment variables and `.env` |

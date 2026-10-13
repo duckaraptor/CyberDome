@@ -23,10 +23,10 @@ from cyberdome.settings import KEYCLOAK_ADMIN_USERNAME, require
 from keycloak_config import (INTROSPECTION_URL, ISSUER_URL, KEYCLOAK_ADMIN_CLIENT_SECRET, KEYCLOAK_CLIENT_ID,
                              KEYCLOAK_CLIENT_SECRET, KEYCLOAK_REALM, KEYCLOAK_SERVER_URL, AUTHORIZATION_URL,
                              REVOCATION_URL, TOKEN_URL, USERINFO_URL)
-from PAM import PAM
-from Keycloak_functions import (extract_user_role, get_client_role_members_emails, get_location, get_mac_details,
+from pam import PAM
+from keycloak_functions import (extract_user_role, get_client_role_members_emails, get_location, get_mac_details,
                                 get_public_ip, get_user_id_by_email, revoke_token, token_is_valid)
-from PAM_Mail_Notification import send_email_to_approver
+from pam_mail import send_email_to_approver
 from cyberdome.trust_signals import store_keycloak_events,load_events_data,process_events
 from cyberdome.data_paths import ACCESS_REQUESTS_FILE, EVENTS_FILE, PAM_DB_FILE, POLICY_CONFIG_FILE, TOKENS_FILE, TRANSACTIONS_FILE, USER_DATA_FILE
 
@@ -341,7 +341,7 @@ def resource_selection():
         device_mac = ':'.join(re.findall('..', '%012x' % uuid.getnode()))
         device_vendor = get_mac_details(device_mac)
 
-    return render_template('resourceSelection.html',user_id=user_id,location=location,public_ip=ip,device_mac=device_mac,device_vendor=device_vendor)
+    return render_template('resource_selection.html',user_id=user_id,location=location,public_ip=ip,device_mac=device_mac,device_vendor=device_vendor)
 
 # Function to create or update policyConfiguration.yml file
 def update_policy_configurations(data):
@@ -388,7 +388,7 @@ def display_tokens():
     with open(TOKENS_FILE, 'r') as file:
         tokens = json.load(file)
     
-    return render_template('Fintech Access Tokens.html', tokens=tokens)
+    return render_template('fintech_access_tokens.html', tokens=tokens)
 
 @app.route('/logging')
 def access_requests():
@@ -423,7 +423,7 @@ def configure_policies():
             # Calculate the expiration time by adding access duration to the current time
             expiration_time = current_time + timedelta(minutes=access_duration)
 
-            return render_template('policyConfiguration.html', expiration_time=expiration_time)
+            return render_template('policy_configuration.html', expiration_time=expiration_time)
 
 @app.route('/privilegedAccess', methods=['GET', 'POST'])
 def privilegedAccess():
@@ -499,7 +499,7 @@ def privilegedAccess():
         else:
             return "Invalid access duration. Please enter a value between 1 and 100 minutes."
 
-    return render_template('privilegedAccessManagement.html',email_addresses=email_addresses)
+    return render_template('privileged_access_management.html',email_addresses=email_addresses)
 
 
 @oidc.require_login
@@ -519,7 +519,7 @@ def testApproval():
 
     access_requests = AccessRequest.query.order_by(AccessRequest.id.desc()).limit(1).all()  # Adjust 'limit' as needed
 
-    return render_template('apprPage.html', access_requests=access_requests, username=username, email=email, user_id=user_id, user_role=user_role)
+    return render_template('approver_page.html', access_requests=access_requests, username=username, email=email, user_id=user_id, user_role=user_role)
 
 @app.route('/approve_request', methods=['POST'])
 def approve_request():
@@ -625,7 +625,7 @@ def process_secret_key():
             else:
                 return "INVALID SECRET KEY"
             
-    return render_template('enterSecretKey.html')
+    return render_template('enter_secret_key.html')
 
 @app.route('/hidden_resource', methods=['POST'])
 def hidden_resource():
@@ -663,7 +663,7 @@ def protected_page():
             # Calculate the expiration time by adding access duration to the current time
             expiration_time = current_time + timedelta(minutes=access_duration)
 
-            return render_template('protectedPage.html', expiration_time=expiration_time)
+            return render_template('protected_page.html', expiration_time=expiration_time)
 
     else:
         print("No PAM Requests Found") 
@@ -677,7 +677,7 @@ def view_access_requests():
     requestor_id = session['oidc_auth_profile'].get('sub')
     print(requestor_id)
 
-    return render_template('viewAccessRequests.html', access_requests=access_requests, approvers = approvers)
+    return render_template('view_access_requests.html', access_requests=access_requests, approvers = approvers)
 
 if __name__ == "__main__":
     with app.app_context():

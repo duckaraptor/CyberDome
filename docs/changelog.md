@@ -4,6 +4,27 @@ This file records the changes we make to CyberDome, newest first. For each fix w
 
 ## 2026-10-13
 
+### Changed: consistent names in the Web UI
+
+**Why:** The Web UI mixed naming styles (`Keycloak_functions.py`, `PAM_Mail_Notification.py`, `apprPage.html`), and one template had spaces in its name (`Fintech Access Tokens.html`).
+
+**What we changed:**
+
+- Renamed the folder `ZeroTrustWebUI/` → `web/`.
+- Renamed the Python modules to `snake_case`: `Keycloak_functions.py` → `keycloak_functions.py`, `PAM.py` → `pam.py`, `PAM_Mail_Notification.py` → `pam_mail.py`.
+- Renamed the templates to `snake_case`:
+  - `apprPage.html` → `approver_page.html`
+  - `enterSecretKey.html` → `enter_secret_key.html`
+  - `Fintech Access Tokens.html` → `fintech_access_tokens.html`
+  - `policyConfiguration.html` → `policy_configuration.html`
+  - `privilegedAccessManagement.html` → `privileged_access_management.html`
+  - `protectedPage.html` → `protected_page.html`
+  - `resourceSelection.html` → `resource_selection.html`
+  - `viewAccessRequests.html` → `view_access_requests.html`
+- Updated the imports and template names in `app.py`, the folder in `cyberdome/data_paths.py`, `scripts/runWebUI.sh` and `.gitignore`.
+- URLs such as `/enterSecretKey` didn't change. Only file names did.
+- We checked that every template the code uses exists (except `no_requests.html`, which was already missing), that all 14 templates load, that every linked CSS file exists, and that the app loads with all 25 routes from another folder.
+
 ### Changed: Web UI secrets moved to `.env`
 
 **Why:** Secrets were written in the code: the Keycloak client secret (`keycloak_config.py` and `client_secrets.json`), the Keycloak admin password and the Flask session key (`app.py`), and a real Gmail app password belonging to the original author (`email_constants.py`).
