@@ -13,5 +13,5 @@ __pycache__
 /data/
 ZeroTrustWebUI/instance/
 
-# Personal notes
-docs/notes.md
+
+/notes/

@@ -10,7 +10,6 @@ This file records the changes we make to CyberDome, newest first. For each fix w
 
 **What we changed:**
 
-- Added `docs/code-walkthrough.md`, a tour of the components and files.
 - Added `ZeroTrustWebUI/data_paths.py`, which builds every data and config path from the code's location.
 - Moved `access_requests.json`, `access_decision.json`, `auth_data.json`, `events.json`, `user_data.json` and `privileged_access.db` into `data/`. The folder is created on startup and git-ignored.
 - `Networking.py`, `TrustAlgorithm.py`, `trust_signal_collection.py`, `app.py` and `synthetic_data.py` now use these paths. `policyConfiguration.yml` and the demo data stay where they were, but are also found by absolute path.
@@ -64,7 +63,6 @@ This file records the changes we make to CyberDome, newest first. For each fix w
 - Added LDAP users `bob`, `charlie`, and `foo` to `infra/openldap/bootstrap.ldif`, with `Researcher`, `Administrator`, and `Policy Administrator` LDAP groups.
 - Added `Researcher` and `Administrator` client roles to `infra/keycloak/myrealm-realm.json`.
 - Added the `app roles` LDAP role mapper, which maps LDAP groups in `ou=groups` to `ZeroTrustPlatform` client roles of the same name.
-- Added `docs/managing-users.md`.
 
 ### Removed
 
