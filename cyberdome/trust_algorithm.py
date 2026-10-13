@@ -1,5 +1,4 @@
 from datetime import datetime
-import os
 
 import yaml
 from .trust_signals import get_latest_access_request, get_latest_auth_data, get_user_identity_data_by_id

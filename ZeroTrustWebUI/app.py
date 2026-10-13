@@ -6,10 +6,9 @@ import time
 # Make the repo root importable (for the shared cyberdome package), wherever app.py is started from
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from flask import Flask,render_template, request, jsonify, session, url_for,redirect, make_response
+from flask import Flask, g, render_template, request, jsonify, session, url_for, redirect, make_response
 import logging
 import math
-from flask import Flask, g
 from flask_oidc import OpenIDConnect
 from keycloak import KeycloakAuthenticationError, KeycloakOpenID
 from flask_sqlalchemy import SQLAlchemy
@@ -20,10 +19,12 @@ from cyberdome.networking import WebUINode
 from keycloak import KeycloakAdmin
 from keycloak import KeycloakOpenIDConnection
 import re, uuid
-from keycloak_config import *
+from keycloak_config import (KEYCLOAK_ADMIN_CLIENT_SECRET, KEYCLOAK_CLIENT_ID, KEYCLOAK_CLIENT_SECRET,
+                             KEYCLOAK_REALM, KEYCLOAK_SERVER_URL, REVOCATION_URL)
 from PAM import PAM
-from Keycloak_functions import *
-from PAM_Mail_Notification import send_email,send_email_to_approver
+from Keycloak_functions import (extract_user_role, get_client_role_members_emails, get_location, get_mac_details,
+                                get_public_ip, get_user_id_by_email, revoke_token, token_is_valid)
+from PAM_Mail_Notification import send_email_to_approver
 from cyberdome.trust_signals import store_keycloak_events,load_events_data,process_events
 from cyberdome.data_paths import ACCESS_REQUESTS_FILE, EVENTS_FILE, PAM_DB_FILE, POLICY_CONFIG_FILE, TOKENS_FILE, TRANSACTIONS_FILE, USER_DATA_FILE
 
@@ -468,13 +469,11 @@ def privilegedAccess():
             db.session.commit()
 
              # Insert approver details to the DB (secret share not to be inserted !!!)
-            for index, approver_email in enumerate(selected_approvers):
-                #approver_secret_share = secret_shares_list[index]  # Get the corresponding secret share
+            for approver_email in selected_approvers:
                 approver = Approver(
                     approverID=get_user_id_by_email(keycloak_admin,approver_email),
                     approverEmail=approver_email,
                     request_id=new_request.id,
-                    #approver_secret_share=approver_secret_share  # Assign the secret share to each approverID
                 )
                 db.session.add(approver)
                 db.session.commit()
@@ -500,11 +499,6 @@ def testApproval():
     #check if the user is part of the approvers group
     if user_role != "Approver":
         return redirect(url_for('revokeToken'))
-    
-    # Retrieve the secret share for the logged-in approver from the database
-    approver = Approver.query.filter_by(approverID=user_id).order_by(Approver.id.desc()).first()
-
-    #secret_share = approver.approver_secret_share if approver else None
 
     access_requests = AccessRequest.query.order_by(AccessRequest.id.desc()).limit(1).all()  # Adjust 'limit' as needed
 

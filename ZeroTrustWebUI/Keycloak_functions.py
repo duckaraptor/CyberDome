@@ -3,7 +3,6 @@ This module will contain a higher level implementation of keycloak functions tha
 
 '''
 
-from keycloak import KeycloakAdmin
 import requests
 
 #function chech if the token is valid

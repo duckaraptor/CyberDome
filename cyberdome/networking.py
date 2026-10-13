@@ -203,25 +203,16 @@ class PolicyEngineNode(Networking):
             print(f"Received a Request for Access Decision from Trust Engine for User {user_id}")
             print(f"Current Subject's Trust Score: {user_trust_score}")
             print(f"Checking against security policies...")
-            print(f"Latest Access Request for the user: {get_latest_access_request(user_id,ACCESS_REQUESTS_FILE)}")
-            print(f"Latest Authentication Data for the user: {get_latest_auth_data(user_id,AUTH_DATA_FILE)}")
-            print(f"User Identity Data: {get_user_identity_data_by_id(user_id,USER_DATA_FILE)}")
 
             user_identity_data = get_user_identity_data_by_id(user_id,USER_DATA_FILE)
             user_auth_data = get_latest_auth_data(user_id, AUTH_DATA_FILE)
             user_access_request = get_latest_access_request(user_id, ACCESS_REQUESTS_FILE)
 
-            access_request_time_str = user_access_request.get('access_request_time', '')
+            print(f"Latest Access Request for the user: {user_access_request}")
+            print(f"Latest Authentication Data for the user: {user_auth_data}")
+            print(f"User Identity Data: {user_identity_data}")
 
-            # Convert the string time to a datetime object
-            access_request_time_str = user_access_request.get('access_request_time', '')
-
-            # Extract time components (hours, minutes, seconds)
-            time_components = access_request_time_str.split(' ')[1]
-
-            time_without_year = ':'.join(time_components.split(':')[:-1])  # Extracting HH:MM:SS
-
-             # Retrieving user_role from user_identity_data
+            # Retrieving user_role from user_identity_data
             user_role = user_identity_data.get('user_role')
 
             print(f"User Role: {user_role}")

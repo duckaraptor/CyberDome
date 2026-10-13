@@ -4,6 +4,24 @@ This file records the changes we make to CyberDome, newest first. For each fix w
 
 ## 2026-10-13
 
+### Changed: removed dead code
+
+**Why:** Unused imports, unused variables and commented-out code make the files harder to read, and hide which code actually matters.
+
+**What we changed:**
+
+- `cyberdome/networking.py`: the Policy Engine loaded the user's three records twice (once to print, once to use). It now loads them once and prints those values. Removed four lines that worked out the request time and never used it.
+- `cyberdome/trust_algorithm.py`: removed the unused `os` import.
+- `ZeroTrustWebUI/app.py`:
+  - merged the two `from flask import ...` lines
+  - replaced `from keycloak_config import *` and `from Keycloak_functions import *` with the names `app.py` uses
+  - removed the unused `send_email` import
+  - removed two commented-out lines and the unused loop counter in the privileged-access request loop
+  - removed an unused database query and a commented-out line in `testApproval()`
+- `ZeroTrustWebUI/Keycloak_functions.py`: removed the unused `KeycloakAdmin` import.
+- `ZeroTrustWebUI/synthetic_data.py`: removed the unused `string` import.
+- We found these with a small checker built on Python's `ast` module, and ran it again afterwards with no findings. A second check confirmed that every name the code uses is defined or imported. `app.py` loads with all 25 routes, and a request through the engines gave the same output and verdict as before.
+
 ### Changed: engine launchers moved to `engines/`, leftovers removed
 
 **Why:** The repo root mixed the engine launchers, an old copy of the Access Proxy and an empty `__init__.py` with the project files.
