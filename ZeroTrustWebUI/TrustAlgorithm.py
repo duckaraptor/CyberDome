@@ -3,6 +3,7 @@ import os
 
 import yaml
 from .trust_signal_collection import get_latest_access_request, get_latest_auth_data, get_user_identity_data_by_id
+from .data_paths import ACCESS_REQUESTS_FILE, AUTH_DATA_FILE, POLICY_CONFIG_FILE, USER_DATA_FILE
 # Function to calculate User Identity Score
 def calculate_user_identity_score(identity_data):
     email_verified_score = 0.0
@@ -89,12 +90,8 @@ def calculate_experience_score(created_timestamp):
     return experience_score
 
 #function to calculate the subject's score based on the access request and contextual information  such as location 
-# Get the parent directory path
-parent_directory = os.path.abspath(os.path.join(os.getcwd(), os.pardir))
-
 # File path to policyConfiguration.yml
-#file_path = os.path.join('policyConfiguration.yml')  # Update the path accordingly
-file_path = 'policyConfiguration.yml'
+file_path = POLICY_CONFIG_FILE
 
 # Load policyConfiguration.yml file
 with open(file_path, 'r') as file:
@@ -170,14 +167,10 @@ def calculate_access_request_score(access_request_data, night_start=night_start_
 
 # Function to calculate Overall Trust Score
 def calculate_overall_trust_score(user_id):
-    #user_data_file_path = os.path.join(os.path.abspath(os.path.join(os.getcwd(), os.pardir)), 'user_data.json')
-    #access_request_data_file_path = os.path.join(os.path.abspath(os.path.join(os.getcwd(), os.pardir)), 'access_requests.json')
-    #auth_data_file_path = os.path.join(os.path.abspath(os.path.join(os.getcwd(), os.pardir)), 'auth_data.json')
-    
     # Get user data using provided functions
-    identity_data = get_user_identity_data_by_id(user_id,'user_data.json')
-    access_request_data = get_latest_access_request(user_id, 'access_requests.json')
-    authentication_data = get_latest_auth_data(user_id, 'auth_data.json')
+    identity_data = get_user_identity_data_by_id(user_id,USER_DATA_FILE)
+    access_request_data = get_latest_access_request(user_id, ACCESS_REQUESTS_FILE)
+    authentication_data = get_latest_auth_data(user_id, AUTH_DATA_FILE)
 
     # Calculate scores for each segment
     user_identity_score = calculate_user_identity_score(identity_data)

@@ -77,10 +77,16 @@ def get_mac_details(mac_address):
     # We will use an API to get the vendor details
     url = "https://api.macvendors.com/"
      
-    # Use get method to fetch details
-    response = requests.get(url+mac_address)
+    # Use get method to fetch details. Private (randomised) MACs have no vendor,
+    # so a failed lookup means "Unknown" instead of blocking the access request.
+    try:
+        response = requests.get(url+mac_address, timeout=5)
+    except requests.RequestException as e:
+        print(f"MAC vendor lookup failed for {mac_address}: {e}")
+        return "Unknown"
     if response.status_code != 200:
-        raise Exception("[!] Invalid MAC Address!")
+        print(f"MAC vendor lookup for {mac_address} returned {response.status_code}")
+        return "Unknown"
     return response.content.decode()
 
 def get_public_ip():

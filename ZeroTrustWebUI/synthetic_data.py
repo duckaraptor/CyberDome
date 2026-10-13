@@ -1,4 +1,5 @@
 import json
+from data_paths import TRANSACTIONS_FILE
 import random
 import string
 from datetime import datetime, timedelta
@@ -22,5 +23,5 @@ for i in range(45):  # Generate 45 transactions
     transactions.append(transaction)
 
 # Save transactions to a JSON file
-with open('mobile_money_transactions.json', 'w') as file:
+with open(TRANSACTIONS_FILE, 'w') as file:
     json.dump(transactions, file, indent=4)

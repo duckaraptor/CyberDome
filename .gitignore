@@ -10,11 +10,7 @@ __pycache__
 .env
 
 # Runtime data written by the app and engines
-access_requests.json
-access_decision.json
-auth_data.json
-events.json
-user_data.json
+/data/
 ZeroTrustWebUI/instance/
 
 # Personal notes

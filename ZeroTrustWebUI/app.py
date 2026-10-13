@@ -21,6 +21,7 @@ from PAM import PAM
 from Keycloak_functions import *
 from PAM_Mail_Notification import send_email,send_email_to_approver
 from trust_signal_collection import store_keycloak_events,load_events_data,process_events
+from data_paths import ACCESS_REQUESTS_FILE, EVENTS_FILE, PAM_DB_FILE, POLICY_CONFIG_FILE, TOKENS_FILE, TRANSACTIONS_FILE, USER_DATA_FILE
 
 sys.path.insert(0,'..')
 
@@ -68,7 +69,7 @@ keycloak_openid = KeycloakOpenID(server_url=f"{KEYCLOAK_SERVER_URL}/",
                                  client_secret_key=KEYCLOAK_CLIENT_SECRET)
 
 # Configuration for SQLAlchemy
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///privileged_access.db' 
+app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{PAM_DB_FILE}'
 db = SQLAlchemy(app)
 
 # Define the database model for access requests
@@ -168,10 +169,7 @@ def home():
                     #storing keycloak events
                     store_keycloak_events(keycloak_admin)
 
-                    parent_directory = os.path.abspath(os.path.join(os.getcwd(), os.pardir))
-
-                    # Define the path to events.json in the parent directory
-                    events_file_path = os.path.join(parent_directory, 'events.json')
+                    events_file_path = EVENTS_FILE
 
                     events_data = load_events_data(events_file_path)
                     # Process event data to yield the auth_data
@@ -183,8 +181,7 @@ def home():
                     all_users = keycloak_admin.get_users()
 
                     # Define the path to the JSON file
-                    parent_directory = os.path.abspath(os.path.join(os.getcwd(), os.pardir))
-                    file_path = os.path.join(parent_directory, 'user_data.json')
+                    file_path = USER_DATA_FILE
 
                     # Extracting user data
                     extracted_data = [
@@ -236,7 +233,7 @@ def receive_and_process_access_request():
     #receive the data from the front end when the resource option is clicked. 
     data = request.json
     #Implement logic for adding the access request in the json file
-    file_path = os.path.join(os.path.abspath(os.path.join(os.getcwd(), os.pardir)), 'access_requests.json')
+    file_path = ACCESS_REQUESTS_FILE
     existing_data = []
     new_id = 1
 
@@ -329,8 +326,7 @@ def resource_selection():
 # Function to create or update policyConfiguration.yml file
 def update_policy_configurations(data):
     # Get the parent directory path
-    parent_directory = os.path.abspath(os.path.join(os.getcwd(), os.pardir))
-    file_path = os.path.join(parent_directory, 'policyConfiguration.yml')
+    file_path = POLICY_CONFIG_FILE
     
     try:
         with open(file_path, 'r') as file:
@@ -361,7 +357,7 @@ def receive_policy_configurations():
 @app.route('/resource-1')
 def display_transactions():
     # Load transactions from the JSON file
-    with open('mobile_money_transactions.json', 'r') as file:
+    with open(TRANSACTIONS_FILE, 'r') as file:
         transactions = json.load(file)
     
     return render_template('transaction_simulation.html', transactions=transactions)
@@ -369,14 +365,14 @@ def display_transactions():
 @app.route('/resource-2')
 def display_tokens():
     # Load tokens from JSON file
-    with open('tokens.json', 'r') as file:
+    with open(TOKENS_FILE, 'r') as file:
         tokens = json.load(file)
     
     return render_template('Fintech Access Tokens.html', tokens=tokens)
 
 @app.route('/logging')
 def access_requests():
-    file_path = os.path.join(os.path.dirname(os.getcwd()), 'access_requests.json')
+    file_path = ACCESS_REQUESTS_FILE
     access_requests_data = []
 
     # The file is created by the first access request

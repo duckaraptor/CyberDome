@@ -2,6 +2,8 @@
 
 CyberDome is a local zero-trust access-control prototype. It combines OIDC authentication, LDAP-backed identities, contextual trust scoring, role-based policy thresholds, a peer-to-peer decision pipeline, and a Flask Web UI.
 
+See the [Code Walkthrough](docs/code-walkthrough.md) for a tour of what each component and file does, following one request from login to decision.
+
 See [How CyberDome Works](docs/how-it-works.md) for the architecture, authentication and access-decision flows, trust calculation, persisted state, and current prototype limitations.
 
 See [Managing Users And Roles](docs/managing-users.md) for adding LDAP and Keycloak users, mapping LDAP groups to application roles, and verifying them.

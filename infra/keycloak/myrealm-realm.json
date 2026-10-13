@@ -1,5 +1,7 @@
 {
   "realm": "myrealm",
+  "eventsEnabled": true,
+  "enabledEventTypes": ["LOGIN", "LOGIN_ERROR"],
   "enabled": true,
   "displayName": "CyberDome",
   "registrationAllowed": false,

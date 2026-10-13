@@ -1,12 +1,61 @@
 # Changelog
 
-This file records development changes made while preparing and running CyberDome locally. Runtime-generated data is listed separately from intentional source and configuration changes.
+This file records the changes we make to CyberDome, newest first. For each fix we write what we saw, what was wrong and how we fixed it. Runtime-generated data is listed separately from intentional source and configuration changes.
+
+## 2026-10-13
+
+### Changed: runtime data now lives in `data/`
+
+**Why:** The generated files were spread over the repo root and `ZeroTrustWebUI/instance/`. Each file was found by a path relative to the folder the process started in, so the Web UI had to start from `ZeroTrustWebUI/` and the engines from the repo root.
+
+**What we changed:**
+
+- Added `docs/code-walkthrough.md`, a tour of the components and files.
+- Added `ZeroTrustWebUI/data_paths.py`, which builds every data and config path from the code's location.
+- Moved `access_requests.json`, `access_decision.json`, `auth_data.json`, `events.json`, `user_data.json` and `privileged_access.db` into `data/`. The folder is created on startup and git-ignored.
+- `Networking.py`, `TrustAlgorithm.py`, `trust_signal_collection.py`, `app.py` and `synthetic_data.py` now use these paths. `policyConfiguration.yml` and the demo data stay where they were, but are also found by absolute path.
+
+### Fixed: one error made an engine stop listening
+
+**What we saw:** After the Trust Engine crashed once, it printed nothing for later access requests, even for users with valid data. No verdict came back.
+
+**What was wrong:** `p2pnetwork` reads each connection's messages in its own thread and passes them to our `node_message`. When our code raised an error there, nothing caught it, so the thread ended. The socket stayed open, so the Access Proxy could still send without any error, but the Trust Engine never read another message from it until a restart.
+
+**How we fixed it:** `node_message` in both `Networking.py` and `ZeroTrustWebUI/Networking.py` now catches errors and prints the traceback with the node's name. The connection keeps working for the next message. We tested this with two real nodes: a message that crashes, then a normal one, which still arrived.
+
+### Fixed: access requests failed with "Invalid MAC Address"
+
+**What we saw:** Clicking a resource under **Access Protected Resources** showed "Invalid MAC Address" for every user, and the request never reached the engines.
+
+**What was wrong:** `/resource-selection` reads the MAC address of the machine running Flask and asks macvendors.com who made it. Our Mac uses a private (randomly generated) MAC, which macOS uses for privacy and virtual network adapters also use. Random MACs have no maker, so the lookup returned `404`. The free API also returns `429` when we call it more than about once a second. In both cases `get_mac_details` (`ZeroTrustWebUI/Keycloak_functions.py`) raised an error that nothing caught.
+
+**How we fixed it:** `get_mac_details` now returns `Unknown` when the lookup fails or takes more than 5 seconds, and prints why. The request carries on.
+
+### Fixed: the Trust Engine crashed for users without login data
+
+**What we saw:** The Trust Engine printed `TypeError: 'NoneType' object is not subscriptable` in `calculate_authentication_data_score`, and no verdict came back.
+
+**What was wrong:** The trust score needs each user's login history from `auth_data.json`, and alice had none. Three things caused this:
+
+1. Keycloak didn't save login events, because the realm never turned them on (`eventsEnabled`).
+2. `store_keycloak_events` (`ZeroTrustWebUI/trust_signal_collection.py`) only asked Keycloak for events from 2023.
+3. `process_events` skipped every event for a user who already had a row in `auth_data.json`, so a user's login history never updated after the first time.
+
+**How we fixed it:**
+
+1. `infra/keycloak/myrealm-realm.json` now sets `eventsEnabled` with `LOGIN` and `LOGIN_ERROR` events. We also turned this on in the running Keycloak through the admin API, so no reset was needed.
+2. `store_keycloak_events` fetches recent events without a date range.
+3. `process_events` adds every new event, matched by user and time.
 
 ## 2026-10-12
 
-### Fixed
+### Fixed: the Web UI returned the wrong verdict
 
-- The Web UI now returns the verdict for the request it sent, instead of the newest entry in `access_decision.json`. The access request `ID` is passed through the engines as `request_id`, and node 4 waits up to 10 seconds for the matching verdict. With no verdict, access is denied (`504`, verdict `0`). This also fixes the crash on the first access request of a fresh setup.
+**What we saw:** The verdict in the browser didn't always match the decision the Policy Engine printed. The first access request on a fresh setup crashed.
+
+**What was wrong:** After sending the request to the Access Proxy, Flask straight away read the newest entry in `access_decision.json`. It didn't wait for the engines, so it usually returned the previous request's verdict, which could be for a different user. On a fresh setup the file didn't exist yet, so reading it crashed.
+
+**How we fixed it:** The access request `ID` now travels through the Access Proxy, Trust Engine and Policy Engine as `request_id`, and comes back with the verdict. Node 4 (`ZeroTrustWebUI/Networking.py`) waits up to 10 seconds for the verdict with that ID (`ACCESS_DECISION_TIMEOUT` in `app.py`). If none arrives, Flask denies access with `504` and verdict `0`.
 
 ## 2026-10-11
 
@@ -26,9 +75,11 @@ This file records development changes made while preparing and running CyberDome
 
 - `.gitignore` now covers runtime data, `.DS_Store`, `.env`, and `.venv/`, and fixes the editor-backup pattern (`*~`).
 
-### Fixed
+### Fixed: `/logging` crashed on a fresh setup
 
-- `/logging` no longer crashes when `access_requests.json` doesn't exist yet.
+**What was wrong:** The page opened `access_requests.json` without checking that it exists. After we stopped tracking the runtime files in git, a fresh clone has no such file until the first access request.
+
+**How we fixed it:** The page shows an empty list when the file doesn't exist yet.
 
 ## 2026-10-05
 

@@ -43,7 +43,7 @@ flowchart LR
 4. Keycloak redirects the browser to Flask with an authorization code.
 5. Flask exchanges the code for tokens and introspects the access token.
 6. The home route reads the current client role and Keycloak user/event data.
-7. Normalized users are written to `user_data.json`; processed authentication events are written to `auth_data.json`.
+7. Normalized users are written to `data/user_data.json`, and processed authentication events to `data/auth_data.json`.
 
 The application recognizes the Keycloak client roles `Approver`, `Security Viewer`, and `Policy Administrator`. The seeded `demo` user has the `Approver` role. LDAP authentication for `alice` works, but an application client role must be assigned before using role-dependent Web UI workflows.
 
@@ -51,12 +51,12 @@ The application recognizes the Keycloak client roles `Approver`, `Security Viewe
 
 1. The user selects a protected resource in the Web UI.
 2. The browser supplies context including location, public IP, device type, operating system, browser, and MAC address.
-3. Flask appends the request to `access_requests.json` and temporarily starts Web UI peer node 4 on port `8004`.
+3. Flask appends the request to `data/access_requests.json` and temporarily starts Web UI peer node 4 on port `8004`.
 4. Node 4 sends the request to the Access Proxy on port `8001`.
 5. The Access Proxy asks the Trust Engine on port `8002` to evaluate the user.
 6. The Trust Engine loads the user's latest identity, authentication, and request records.
 7. The Trust Engine sends its score to the Policy Engine on port `8003`.
-8. The Policy Engine applies `policyConfiguration.yml`, writes `access_decision.json`, and sends the verdict to node 4.
+8. The Policy Engine applies `policyConfiguration.yml`, writes `data/access_decision.json`, and sends the verdict to node 4.
 9. Node 4 waits up to 10 seconds for the verdict carrying this request's ID, and Flask returns it to the browser. If none arrives, Flask denies access (`504`, verdict `0`).
 
 The access request's `ID` travels through the engines as `request_id`, so each verdict can be matched to its request. Messages are Python dictionaries wrapped with a sender ID and exchanged by `p2pnetwork` over localhost TCP connections.
@@ -125,7 +125,7 @@ The Web UI also has a separate privileged-access workflow:
 2. The application generates a resource secret and splits it into shares with threshold secret sharing.
 3. Selected approvers receive shares by email and approve or reject the request.
 4. Once enough shares are supplied, the application reconstructs and validates the secret.
-5. Requests and approver records are stored in `ZeroTrustWebUI/instance/privileged_access.db`.
+5. Requests and approver records are stored in `data/privileged_access.db`.
 
 The threshold is currently calculated as 80 percent of the available approvers.
 
@@ -135,13 +135,13 @@ Most JSON and SQLite state files below are created or updated at runtime after t
 
 | Path | Contents |
 | --- | --- |
-| `access_requests.json` | Context submitted by the Web UI |
-| `access_decision.json` | Policy verdicts and trust scores |
-| `auth_data.json` | Processed authentication events and sign-in values |
-| `events.json` | Raw events collected from Keycloak |
-| `user_data.json` | Normalized Keycloak identities and application roles |
+| `data/access_requests.json` | Context submitted by the Web UI |
+| `data/access_decision.json` | Policy verdicts and trust scores |
+| `data/auth_data.json` | Processed authentication events and sign-in values |
+| `data/events.json` | Raw events collected from Keycloak |
+| `data/user_data.json` | Normalized Keycloak identities and application roles |
 | `policyConfiguration.yml` | Thresholds, location groups, and time period |
-| `ZeroTrustWebUI/instance/privileged_access.db` | PAM requests and approver state |
+| `data/privileged_access.db` | PAM requests and approver state |
 | Docker named volumes | Keycloak Postgres data and OpenLDAP data/configuration |
 
 ## Runtime Topology
@@ -159,7 +159,7 @@ Most JSON and SQLite state files below are created or updated at runtime after t
 
 `runAll.sh` starts the Trust Engine, Policy Engine, and Access Proxy in dependency order. It checks ports `8001` through `8003`, monitors its child processes, and stops all three on `Ctrl+C`.
 
-The Web UI must run from `ZeroTrustWebUI`, while the decision engines must run from the repository root. Several data paths are relative to these working directories.
+All data paths come from `ZeroTrustWebUI/data_paths.py` and are built from the code's location, so they don't depend on the folder a process starts in. The Web UI still has to start from `ZeroTrustWebUI`, because Flask-OIDC reads `client_secrets.json` from the current folder.
 
 ## Identity Bootstrap
 
@@ -186,7 +186,6 @@ This command destroys all local identity data.
 - Local peer traffic is unauthenticated and unencrypted.
 - JSON files are shared mutable state without locking or transactions.
 - Each request starts node 4 on port `8004`, so two simultaneous access requests clash on that port.
-- Keycloak event collection currently requests a fixed 2023 date range.
 - Trust scoring expects complete identity, authentication, and request records plus a numeric account timestamp.
 - Users without a recognized client role are not explicitly denied by current role-threshold logic.
 - Local secrets and email credentials are stored in source files and must be replaced outside local development.
@@ -215,7 +214,7 @@ Stop old engine processes before running `./runAll.sh` again.
 
 ### Login works but evaluation fails
 
-Verify that the user has an application client role and matching records in `user_data.json`, `auth_data.json`, and `access_requests.json`. The current scoring code requires all three records.
+Verify that the user has an application client role and matching records in `data/user_data.json`, `data/auth_data.json`, and `data/access_requests.json`. The current scoring code requires all three records.
 
 ## Main Source Files
 
@@ -231,4 +230,5 @@ Verify that the user has an application client role and matching records in `use
 | `infra/openldap/` | OpenLDAP image and seed LDIF |
 | `ZeroTrustWebUI/app.py` | Flask routes and application workflows |
 | `ZeroTrustWebUI/TrustAlgorithm.py` | Trust-score calculations |
+| `ZeroTrustWebUI/data_paths.py` | Locations of the shared data and config files |
 | `ZeroTrustWebUI/trust_signal_collection.py` | Event processing and JSON lookups |

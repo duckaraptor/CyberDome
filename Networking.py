@@ -6,10 +6,12 @@ Uses peer to peer communication without involvement of a centralized server for 
 
 '''
 import datetime
+import traceback
 from p2pnetwork.node import Node
 import yaml
 import ZeroTrustWebUI.TrustAlgorithm as ta
 from ZeroTrustWebUI.trust_signal_collection import *
+from ZeroTrustWebUI.data_paths import ACCESS_DECISIONS_FILE, ACCESS_REQUESTS_FILE, AUTH_DATA_FILE, POLICY_CONFIG_FILE, USER_DATA_FILE
 
 class Networking(Node):
     #Define a dictionary of the node roles based on their node.id attributes
@@ -81,7 +83,7 @@ class Networking(Node):
             self.send_message_to_node('3',data)
     def make_access_decision(self,user_role, user_trust_score, sign_in_risk):
     # Load policy configuration data from YAML file
-        with open('policyConfiguration.yml', 'r') as file:
+        with open(POLICY_CONFIG_FILE, 'r') as file:
             policy_configuration = yaml.safe_load(file)
 
         # Access specific values from the policy configuration
@@ -117,13 +119,13 @@ class Networking(Node):
             print(f"Received a Request for Access Decision from Trust Engine for User {user_id}")
             print(f"Current Subject's Trust Score: {user_trust_score}")
             print(f"Checking against security policies...")
-            print(f"Latest Access Request for the user: {get_latest_access_request(user_id,'access_requests.json')}")
-            print(f"Latest Authentication Data for the user: {get_latest_auth_data(user_id,'auth_data.json')}")
-            print(f"User Identity Data: {get_user_identity_data_by_id(user_id,'user_data.json')}")
+            print(f"Latest Access Request for the user: {get_latest_access_request(user_id,ACCESS_REQUESTS_FILE)}")
+            print(f"Latest Authentication Data for the user: {get_latest_auth_data(user_id,AUTH_DATA_FILE)}")
+            print(f"User Identity Data: {get_user_identity_data_by_id(user_id,USER_DATA_FILE)}")
 
-            user_identity_data = get_user_identity_data_by_id(user_id,'user_data.json')
-            user_auth_data = get_latest_auth_data(user_id, 'auth_data.json')
-            user_access_request = get_latest_access_request(user_id, 'access_requests.json')
+            user_identity_data = get_user_identity_data_by_id(user_id,USER_DATA_FILE)
+            user_auth_data = get_latest_auth_data(user_id, AUTH_DATA_FILE)
+            user_access_request = get_latest_access_request(user_id, ACCESS_REQUESTS_FILE)
 
             access_request_time_str = user_access_request.get('access_request_time', '')
 
@@ -151,7 +153,7 @@ class Networking(Node):
 
             print(f"Country: {country}")
 
-            file_path = 'access_decision.json'
+            file_path = ACCESS_DECISIONS_FILE
 
             # Check if the file exists to determine the initial ID
             if os.path.exists(file_path):
@@ -243,18 +245,24 @@ class Networking(Node):
             message_content = message_content["messageContent"]
             #extract other future message atributes like unique hash, and message intent
 
-        # Process the message based on the sender's ID
-        if self.message_is_from_access_proxy(sender_id):
-            self.process_message_from_access_proxy(sender_id, message_content)
-        elif self.message_is_from_trust_engine(sender_id):
-            self.process_message_from_trust_engine(sender_id, message_content)
-        elif self.message_is_from_policy_engine(sender_id):
-            self.process_message_from_policy_engine(sender_id, message_content)
-        elif self.message_is_from_web_ui(sender_id):
-            self.process_message_from_web_ui(sender_id, message_content)
-        else:
-            print(f"Received a message from an unknown sender ({sender_id}): {message_content}")
-        
+        # Process the message based on the sender's ID.
+        # An uncaught error here would end p2pnetwork's receive thread for this
+        # connection, and the node would silently stop hearing from that sender.
+        try:
+            if self.message_is_from_access_proxy(sender_id):
+                self.process_message_from_access_proxy(sender_id, message_content)
+            elif self.message_is_from_trust_engine(sender_id):
+                self.process_message_from_trust_engine(sender_id, message_content)
+            elif self.message_is_from_policy_engine(sender_id):
+                self.process_message_from_policy_engine(sender_id, message_content)
+            elif self.message_is_from_web_ui(sender_id):
+                self.process_message_from_web_ui(sender_id, message_content)
+            else:
+                print(f"Received a message from an unknown sender ({sender_id}): {message_content}")
+        except Exception:
+            print(f"\n{self.get_node_role(self.id)} failed to process a message from {self.get_node_role(sender_id)}:")
+            traceback.print_exc()
+
     def node_disconnect_with_outbound_node(self, node):
         print(f"\n{self.get_node_role(self.id)} wants to disconnect with {node.id}")   
             

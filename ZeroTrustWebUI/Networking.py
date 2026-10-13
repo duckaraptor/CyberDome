@@ -8,6 +8,7 @@ Uses peer to peer communication without involvement of a centralized server for 
 
 import json
 import threading
+import traceback
 from p2pnetwork.node import Node
 
 class Networking(Node):
@@ -136,17 +137,23 @@ class Networking(Node):
             message_content = message_content["messageContent"]
             #extract other future message atributes like unique hash, and message intent
 
-        # Process the message based on the sender's ID
-        if self.message_is_from_access_proxy(sender_id):
-            self.process_message_from_access_proxy(sender_id, message_content)
-        elif self.message_is_from_trust_engine(sender_id):
-            self.process_message_from_trust_engine(sender_id, message_content)
-        elif self.message_is_from_policy_engine(sender_id):
-            self.process_message_from_policy_engine(sender_id, message_content)
-        elif self.message_is_from_web_ui(sender_id):
-            self.process_message_from_web_ui(sender_id, message_content)
-        else:
-            print(f"Received a message from an unknown sender ({sender_id}): {message_content}")
+        # Process the message based on the sender's ID.
+        # An uncaught error here would end p2pnetwork's receive thread for this
+        # connection, and the node would silently stop hearing from that sender.
+        try:
+            if self.message_is_from_access_proxy(sender_id):
+                self.process_message_from_access_proxy(sender_id, message_content)
+            elif self.message_is_from_trust_engine(sender_id):
+                self.process_message_from_trust_engine(sender_id, message_content)
+            elif self.message_is_from_policy_engine(sender_id):
+                self.process_message_from_policy_engine(sender_id, message_content)
+            elif self.message_is_from_web_ui(sender_id):
+                self.process_message_from_web_ui(sender_id, message_content)
+            else:
+                print(f"Received a message from an unknown sender ({sender_id}): {message_content}")
+        except Exception:
+            print(f"\n{self.get_node_role(self.id)} failed to process a message from {self.get_node_role(sender_id)}:")
+            traceback.print_exc()
         
     def node_disconnect_with_outbound_node(self, node):
         print(f"\n{self.get_node_role(self.id)} wants to disconnect with {node.id}")   

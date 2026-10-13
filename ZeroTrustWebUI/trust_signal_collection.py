@@ -10,6 +10,12 @@ HANDLING PROCESSING OF AUTH_DATA
 import json
 import os
 
+# Imported as a package module by the engines, and as a plain module by the Web UI
+try:
+    from .data_paths import AUTH_DATA_FILE, EVENTS_FILE
+except ImportError:
+    from data_paths import AUTH_DATA_FILE, EVENTS_FILE
+
 def calculate_sign_in_risk(auth_data):
     user_dict = {}
     sign_in_risk = {}
@@ -100,7 +106,7 @@ def process_events(events_data):
             entry['sign_in_risk'] = (entry['sign_in_risk'] + predicted_sign_in_risk[user_id]) / 2
 
     # File handling to store events in a JSON file
-    file_path = os.path.join(os.path.abspath(os.path.join(os.getcwd(), os.pardir)), 'auth_data.json')
+    file_path = AUTH_DATA_FILE
 
     try:
         existing_data = []
@@ -113,8 +119,10 @@ def process_events(events_data):
                     last_entry = existing_data[-1]
                     new_id = last_entry.get('ID', 0) + 1  # Check if 'ID' exists, otherwise set new_id to 1
 
-        # Filter out events that already exist in the JSON file
-        auth_data_to_add = [event for event in auth_data if not any(event['user_id'] == entry.get('user_id') for entry in existing_data)]
+        # Filter out events that already exist in the JSON file (same user and time).
+        # New logins are added, so each user's latest sign-in value stays current.
+        existing_keys = {(entry.get('user_id'), entry.get('time')) for entry in existing_data}
+        auth_data_to_add = [event for event in auth_data if (event['user_id'], event['time']) not in existing_keys]
 
         for i, event in enumerate(auth_data_to_add, start=new_id):
             event['ID'] = i
@@ -150,9 +158,8 @@ HANDLING PROCESSING AND STORAGE OF EVENTS DATA
 '''
 
 def store_keycloak_events(keycloak_admin):
+    # No date range: fetch the most recent login events, whatever the year
     query_params = {
-        "dateFrom": "2023-01-01",
-        "dateTo": "2023-12-31",
         "max": 10000,
     }
 
@@ -176,7 +183,7 @@ def store_keycloak_events(keycloak_admin):
 
         cleaned_data.append(cleaned_event)
 
-    file_path = os.path.join(os.path.abspath(os.path.join(os.getcwd(), os.pardir)), 'events.json')
+    file_path = EVENTS_FILE
 
     try:
         existing_data = []
