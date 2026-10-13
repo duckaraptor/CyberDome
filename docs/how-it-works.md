@@ -59,7 +59,7 @@ The application recognizes the Keycloak client roles `Approver`, `Security Viewe
 8. The Policy Engine applies `policyConfiguration.yml`, writes `data/access_decision.json`, and sends the verdict to node 4.
 9. Node 4 waits up to 10 seconds for the verdict carrying this request's ID, and Flask returns it to the browser. If none arrives, Flask denies access (`504`, verdict `0`).
 
-The access request's `ID` travels through the engines as `request_id`, so each verdict can be matched to its request. Messages are Python dictionaries wrapped with a sender ID and exchanged by `p2pnetwork` over localhost TCP connections.
+The access request's `ID` travels through the engines as `request_id`, so each verdict can be matched to its request. Each node is its own class in `cyberdome/networking.py` and only handles the messages it expects. Messages are Python dictionaries wrapped with a sender ID and exchanged by `p2pnetwork` over localhost TCP connections.
 
 ## Trust Calculation
 
@@ -223,7 +223,7 @@ Verify that the user has an application client role and matching records in `dat
 | `AccessProxy.py` | Access Proxy process, node 1 |
 | `TrustEngine.py` | Trust Engine process, node 2 |
 | `PolicyEngine.py` | Policy Engine process, node 3 |
-| `Networking.py` | Peer routing and scoring dispatch |
+| `cyberdome/networking.py` | Peer-to-peer nodes: a `Networking` base class plus `AccessProxyNode`, `TrustEngineNode`, `PolicyEngineNode` and `WebUINode` |
 | `cyberdome/policy.py` | Policy rules: role thresholds and the sign-in check |
 | `scripts/` | Launchers: `runAll.sh` for the three engines, `runWebUI.sh` for the Web UI, and one script per engine |
 | `tests/` | Manual check scripts: `test.py` prints one user's trust score, `testAP.py` runs a stand-alone Access Proxy |

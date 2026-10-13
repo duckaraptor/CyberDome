@@ -16,7 +16,7 @@ from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime, timedelta
 import requests
 import yaml
-from Networking import Networking
+from cyberdome.networking import WebUINode
 from keycloak import KeycloakAdmin
 from keycloak import KeycloakOpenIDConnection
 import re, uuid
@@ -276,8 +276,8 @@ def receive_and_process_access_request():
     
     #send the access request data to the AP in the peer to peer network of nodes
 
-    #first create an instance of the Networking class
-    node4 = Networking("127.0.0.1",8004,4)
+    #first create the Web UI's node (node 4)
+    node4 = WebUINode("127.0.0.1",8004)
     node4.start()
     try:
         node4.connect_with_node('127.0.0.1',8001) #connect with the access proxy

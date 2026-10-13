@@ -4,10 +4,10 @@ from threading import Event
 
 sys.path.insert(0, '..') # Import the files where the modules are located
 
-from Networking import Networking
+from cyberdome.networking import PolicyEngineNode
 
 #Create an instance of this node
-node_3 = Networking("127.0.0.1", 8003, 3)
+node_3 = PolicyEngineNode("127.0.0.1", 8003)
 
 #Start the node
 node_3.start()

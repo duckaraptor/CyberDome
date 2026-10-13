@@ -4,6 +4,23 @@ This file records the changes we make to CyberDome, newest first. For each fix w
 
 ## 2026-10-13
 
+### Changed: one node base class with a subclass per node
+
+**Why:** There were two node classes. `Networking.py` in the root was used by all three engines, and `ZeroTrustWebUI/Networking.py` was an older, smaller copy used by the Web UI. Every engine carried the handlers of every other engine and worked out its job from who sent the message. The two copies had already drifted apart.
+
+**What we changed:**
+
+- Moved `Networking.py` to `cyberdome/networking.py` and removed `ZeroTrustWebUI/Networking.py`.
+- The `Networking` base class keeps what every node shares: sending to a node by ID, receiving and dispatching by sender, catching errors, and the connection messages. Its message handlers only print.
+- Added one subclass per node. Each one sets its own node ID and overrides only the handler it needs:
+  - `AccessProxyNode` (1) handles requests from the Web UI.
+  - `TrustEngineNode` (2) handles score requests from the Access Proxy.
+  - `PolicyEngineNode` (3) handles scores from the Trust Engine.
+  - `WebUINode` (4) handles verdicts from the Policy Engine and has `wait_for_access_decision`.
+- The launchers, `app.py`, `node1.py` and `tests/testAP.py` create their own node type, for example `AccessProxyNode("127.0.0.1", 8001)`. The node ID is no longer passed in, so it can't be wrong.
+- The engine logic itself didn't change.
+- We tested the node IDs, that each class overrides only its own handler, that a crash in a handler keeps the connection working, and that `WebUINode` receives its verdict. We also ran alice's request through the real engines started by `scripts/runAll.sh`. The Web UI got the verdict for that request, with the same score and verdict as before.
+
 ### Changed: policy rules moved to `cyberdome/policy.py`
 
 **Why:** The Policy Engine's rules (`make_access_decision`) were a method inside the network class in `Networking.py`, next to the message handling. Section 3.4 of the assignment needs at least five explicit policies, so the rules need a place of their own that is easy to read, test and extend.

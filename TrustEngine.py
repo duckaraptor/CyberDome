@@ -4,10 +4,10 @@ from threading import Event
 
 sys.path.insert(0, '..') # Import the files where the modules are located
 
-from Networking import Networking
+from cyberdome.networking import TrustEngineNode
 
 #Create an instance of this node
-node_2 = Networking("127.0.0.1", 8002, 2)
+node_2 = TrustEngineNode("127.0.0.1", 8002)
 
 #Start the node2
 node_2.start()

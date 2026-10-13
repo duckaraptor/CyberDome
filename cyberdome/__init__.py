@@ -6,5 +6,6 @@ Code shared by the decision engines and the Web UI:
 - trust_signals: collects Keycloak login events and reads the latest records per user
 - trust_algorithm: calculates a user's trust score
 - policy: the Policy Engine's rules, which turn a trust score into allow or deny
+- networking: the peer-to-peer nodes (Access Proxy, Trust Engine, Policy Engine, Web UI)
 
 '''

@@ -4,10 +4,10 @@ import sys
 # Make the repo root importable, wherever this script is started from
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from Networking import Networking
+from cyberdome.networking import AccessProxyNode
 
 #Create an instance of this node
-node_1 = Networking("127.0.0.1", 8001, 1)
+node_1 = AccessProxyNode("127.0.0.1", 8001)
 
 #Start the node
 node_1.start()

@@ -2,10 +2,10 @@ import sys
 
 sys.path.insert(0, '..') # Import the files where the modules are located
 
-from Networking import Networking
+from cyberdome.networking import AccessProxyNode
 
 #Create an instance of this node
-node_1 = Networking("127.0.0.1", 8001, 1)
+node_1 = AccessProxyNode("127.0.0.1", 8001)
 
 #Start the node
 node_1.start()
