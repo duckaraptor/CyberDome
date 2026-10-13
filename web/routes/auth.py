@@ -10,6 +10,7 @@ import os
 from flask import Blueprint, make_response, redirect, render_template, session, url_for
 from keycloak import KeycloakAuthenticationError
 
+from cyberdome.access_rules import is_role_allowed
 from cyberdome.data_paths import EVENTS_FILE, USER_DATA_FILE
 from cyberdome.trust_signals import load_events_data, process_events, store_keycloak_events
 from extensions import keycloak_admin, keycloak_openid, oidc
@@ -126,7 +127,17 @@ def home():
                     with open(file_path, 'w') as json_file:
                         json.dump(existing_data, json_file, indent=4)
 
-                    return render_template('home.html', username=username, email=email, user_id=user_id, user_role=user_role)
+                    # Which menu options this user may use, from the role table in policyConfiguration.yml.
+                    # Only for convenience: each page checks access again on the server.
+                    menu_access = {
+                        'option1': True,  # resource selection: each resource is checked when it's requested
+                        'option2': is_role_allowed(user_roles, 'policy_configuration'),  # PAM request, which leads to policy configuration
+                        'option3': is_role_allowed(user_roles, 'logging'),
+                        'option4': is_role_allowed(user_roles, 'pam_approval'),
+                    }
+
+                    return render_template('home.html', username=username, email=email, user_id=user_id,
+                                           user_role=', '.join(user_roles) or 'no role', menu_access=menu_access)
                 else:
                     return "<h1>NOT AUTHORIZED!</h1>"
             else:

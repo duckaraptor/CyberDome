@@ -8,12 +8,12 @@ secret is rebuilt once enough approvers have approved.
 import math
 from datetime import datetime, timedelta
 
-import requests
 from flask import Blueprint, jsonify, redirect, render_template, request, session, url_for
 
-from extensions import db, keycloak_admin, keycloak_openid, oidc
+from authz import require_authentication, require_role
+from extensions import db, keycloak_admin
 from keycloak_config import KEYCLOAK_CLIENT_ID
-from keycloak_functions import extract_user_role, get_client_role_members_emails, get_user_id_by_email
+from keycloak_functions import get_client_role_members_emails, get_user_id_by_email
 from models import AccessRequest, Approver
 from pam import PAM
 from pam_mail import send_email_to_approver
@@ -27,6 +27,7 @@ THRESHOLD = None
 
 
 @bp.route('/privilegedAccess', methods=['GET', 'POST'])
+@require_authentication
 def privilegedAccess():
     #dynamically query the keycloak API for the list of approvers to display for the requestor
     client_id = keycloak_admin.get_client_id(KEYCLOAK_CLIENT_ID)
@@ -103,28 +104,22 @@ def privilegedAccess():
     return render_template('privileged_access_management.html',email_addresses=email_addresses)
 
 
-# Known issue: require_login is above route, so Flask registers this page without the login check.
-# Kept as it was during the restructure. To be fixed with the role checks (assignment section 3.1).
-@oidc.require_login
 @bp.route('/testing')
+@require_role('pam_approval')
 def testApproval():
-    #extract the approver's details
-    if 'oidc_auth_profile' in session:
-        auth_profile = session['oidc_auth_profile']
-        username = auth_profile.get('name')
-        email = auth_profile.get('email')
-        user_id = auth_profile.get('sub')
-        user_role = extract_user_role(oidc,keycloak_openid)[0]
-
-    #check if the user is part of the approvers group
-    if user_role != "Approver":
-        return redirect(url_for('auth.revokeToken'))
+    #extract the approver's details (require_role has already checked that the user is an Approver)
+    auth_profile = session.get('oidc_auth_profile', {})
+    username = auth_profile.get('name')
+    email = auth_profile.get('email')
+    user_id = auth_profile.get('sub')
+    user_role = 'Approver'
 
     access_requests = AccessRequest.query.order_by(AccessRequest.id.desc()).limit(1).all()  # Adjust 'limit' as needed
 
     return render_template('approver_page.html', access_requests=access_requests, username=username, email=email, user_id=user_id, user_role=user_role)
 
 @bp.route('/approve_request', methods=['POST'])
+@require_role('pam_approval')
 def approve_request():
     if request.method == 'POST':
         data = request.json
@@ -147,6 +142,7 @@ def approve_request():
     return 'Invalid Request'
 
 @bp.route('/approval_status', methods=['GET','POST'])
+@require_authentication
 def approval_status():
 
     #check if there is a POST request
@@ -210,10 +206,12 @@ def approval_status():
 
 
 @bp.route('/success', methods = ['GET'])
+@require_authentication
 def approval_success():
     return render_template('success.html')
 
 @bp.route('/enterSecretKey', methods=['GET', 'POST'])
+@require_authentication
 def process_secret_key():
 
     if request.method == 'POST':
@@ -221,33 +219,21 @@ def process_secret_key():
         entered_secret_key = request.form.get('secret_key')
 
         if entered_secret_key:
-            response = requests.post('http://127.0.0.1:5000/hidden_resource',data={'secret_key': entered_secret_key})
-
-            if response.text == 'Valid':
+            if is_valid_secret_key(entered_secret_key):
                 return redirect('/configurePolicies')
             else:
                 return "INVALID SECRET KEY"
 
     return render_template('enter_secret_key.html')
 
-@bp.route('/hidden_resource', methods=['POST'])
-def hidden_resource():
-    entered_secret_key = request.form.get('secret_key')
-
-    print (f"ENTERED SECRET MESSAGE: {entered_secret_key}")
-    #extract the randomized secret key from the PAM endpoint
-
-    secret_message = RESOURCE_SECRET_KEY # assign it to the reandomized secret generated at the PAM endpoint
-
-    print(f"SECRET MESSAGE: {secret_message}")
-
-    print(secret_message)
-    if entered_secret_key == secret_message:
-        return 'Valid'
-    else:
-        return 'Invalid'
+# Checks the secret key rebuilt from the approvers' shares. This used to be an open /hidden_resource
+# route that the server called over HTTP, which also let anyone test guesses and printed the secret.
+def is_valid_secret_key(entered_secret_key):
+    # the randomized secret generated at the PAM endpoint
+    return bool(RESOURCE_SECRET_KEY) and entered_secret_key == RESOURCE_SECRET_KEY
 
 @bp.route('/protected_page')
+@require_authentication
 def protected_page():
     # Retrieve the access duration from the database for the latest approved request ID
 
@@ -272,9 +258,8 @@ def protected_page():
         print("No PAM Requests Found")
         return "No REQUESTS FOUND!"
 
-# Known issue: same decorator order as /testing, so this page has no login check either.
-@oidc.require_login
 @bp.route('/viewAccessRequests')
+@require_authentication
 def view_access_requests():
     access_requests = AccessRequest.query.all()
     approvers = Approver.query.all()

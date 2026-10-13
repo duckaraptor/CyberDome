@@ -117,6 +117,16 @@ The Policy Engine begins with an allow verdict and changes it to deny when:
 
 Thresholds and contextual categories are configured in `policyConfiguration.yml` and can also be updated through the Web UI policy page.
 
+## Role-Based Access to Pages
+
+Every protected page checks the user before it runs (`web/authz.py`):
+
+1. Not logged in: redirect to the Keycloak login.
+2. Token no longer active (introspection): `401`.
+3. None of the user's roles is allowed for the page's resource: `403`.
+
+The allowed roles per resource are in the `resources` section of `policyConfiguration.yml`. The policy page rewrites this file when it saves, so keys get sorted and comments are dropped.
+
 ## Privileged Access Management
 
 The Web UI also has a separate privileged-access workflow:
@@ -187,7 +197,7 @@ This command destroys all local identity data.
 - JSON files are shared mutable state without locking or transactions.
 - Each request starts node 4 on port `8004`, so two simultaneous access requests clash on that port.
 - Trust scoring expects complete identity, authentication, and request records plus a numeric account timestamp.
-- Users without a recognized client role are not explicitly denied by current role-threshold logic.
+- Pages now check roles against the resource table, but the Policy Engine's own role thresholds still don't deny users with an unknown role.
 - The Web UI's secrets come from `.env`, but the identity stack's local passwords are still in `compose.yml` and `infra/` (Postgres, LDAP admin, Keycloak admin, and the seeded users). The `ZeroTrustPlatform` client secret is also in `infra/keycloak/myrealm-realm.json`, and `KEYCLOAK_CLIENT_SECRET` must match it.
 - Flask debug mode and Keycloak development mode are enabled.
 
@@ -231,6 +241,8 @@ Verify that the user has an application client role and matching records in `dat
 | `infra/keycloak/` | Seeded Keycloak realm |
 | `infra/openldap/` | OpenLDAP image and seed LDIF |
 | `web/app.py` | Creates the Flask app, loads its settings and registers the pages |
+| `web/authz.py` | Page checks: `@require_authentication` (login and active token) and `@require_role(resource)` (role table) |
+| `cyberdome/access_rules.py` | Reads the role-to-resource table from `policyConfiguration.yml` |
 | `web/extensions.py` | Shared objects: login (`oidc`), the PAM database (`db`) and the Keycloak clients |
 | `web/models.py` | PAM database tables (`AccessRequest`, `Approver`) |
 | `web/routes/` | The pages, one blueprint per area: `auth`, `access`, `resources`, `policy_config`, `monitoring`, `privileged_access` |

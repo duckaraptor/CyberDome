@@ -2,6 +2,35 @@
 
 This file records the changes we make to CyberDome, newest first. For each fix we write what we saw, what was wrong and how we fixed it. Runtime-generated data is listed separately from intentional source and configuration changes.
 
+## 2026-10-14
+
+### Added: role-based access control on every page (assignment section 3.1)
+
+**What we saw:** Roles were only used to grey out options in the browser (`home.html`), and only for three old roles, so Researcher and Administrator saw everything. Most pages had no login check at all. `/testing` and `/viewAccessRequests` had their login check in the wrong order, so it never ran. `/receivePolicyConfigurations`, which saves policy changes, could be called by anyone. `/hidden_resource` let anyone test guesses for the PAM secret, and printed the real secret to the console.
+
+**What we changed:**
+
+- `policyConfiguration.yml` has a new `resources` table: each protected resource with its path, allowed roles, and whether it is an admin resource. Authorization is now driven by this file.
+
+| Resource | Path | Allowed roles | Admin resource |
+| --- | --- | --- | --- |
+| `resource_1` | `/resource-1` | Researcher, Administrator | No |
+| `resource_2` | `/resource-2` | Administrator | No |
+| `policy_configuration` | `/configurePolicies`, `/receivePolicyConfigurations` | Administrator, Policy Administrator | Yes |
+| `logging` | `/logging` | Administrator, Security Viewer | Yes |
+| `pam_approval` | `/testing`, `/approve_request` | Approver | No |
+
+- `cyberdome/access_rules.py` reads the table (`allowed_roles`, `is_role_allowed`, `is_admin_resource`). The Policy Engine will use the same functions.
+- `web/authz.py` adds two checks for pages:
+  - `@require_authentication`: logged in, and Keycloak says the token is still active (one token introspection per request). Otherwise a login redirect or `401`.
+  - `@require_role(resource)`: the same, and one of the user's roles must be allowed for the resource. Otherwise `403`.
+  - If Keycloak can't be reached, the answer is `503`. Unknown resources are refused. Both fail closed.
+- `web/templates/access_denied.html` explains a `401` or `403` refusal.
+- Every page except `/`, `/login`, `/revokeToken` and `/home` (which handle login themselves) now has one of the two checks. This also fixes the decorator order on `/testing` and `/viewAccessRequests`.
+- `/hidden_resource` is removed. The secret check is now a plain function (`is_valid_secret_key`) and no longer prints the secret.
+- The home menu gets the allowed options from the server, worked out from the same table, instead of guessing from one role name. The page shows all of the user's roles.
+- Added `tests/check_access_control.py`. It logs in as alice, bob, charlie and foo through Keycloak and checks every protected page against the table, plus not-logged-in, fake-token and revoked-token cases, and task scenarios 1, 2 and 5. All 54 checks passed.
+
 ## 2026-10-13
 
 ### Changed: `app.py` split into blueprints

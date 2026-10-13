@@ -13,9 +13,9 @@ from datetime import datetime
 
 from flask import Blueprint, jsonify, render_template, request, session
 
+from authz import require_authentication
 from cyberdome.data_paths import ACCESS_REQUESTS_FILE
 from cyberdome.networking import WebUINode
-from extensions import oidc
 from keycloak_functions import get_location, get_mac_details, get_public_ip
 
 bp = Blueprint('access', __name__)
@@ -26,6 +26,7 @@ ACCESS_DECISION_TIMEOUT = 10
 
 #route to receive an access request and forward it to the AP
 @bp.route('/receive-access-request', methods = ['POST'])
+@require_authentication
 def receive_and_process_access_request():
     #receive the data from the front end when the resource option is clicked.
     data = request.json
@@ -100,7 +101,7 @@ def receive_and_process_access_request():
     return jsonify(response_data)
 
 @bp.route('/resource-selection')
-@oidc.require_login
+@require_authentication
 def resource_selection():
     if 'oidc_auth_profile' in session:
         auth_profile = session['oidc_auth_profile']

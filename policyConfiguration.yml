@@ -11,6 +11,40 @@ mediumRiskLocations:
 - KE
 periodEndInput: 06:00:00
 periodStartInput: 00:00:00
+resources:
+  logging:
+    adminResource: true
+    allowedRoles:
+    - Administrator
+    - Security Viewer
+    description: Logging and monitoring (the audit log)
+    path: /logging
+  pam_approval:
+    adminResource: false
+    allowedRoles:
+    - Approver
+    description: Approve privileged access (PAM) requests
+    path: /testing
+  policy_configuration:
+    adminResource: true
+    allowedRoles:
+    - Administrator
+    - Policy Administrator
+    description: Change the security policies
+    path: /configurePolicies
+  resource_1:
+    adminResource: false
+    allowedRoles:
+    - Researcher
+    - Administrator
+    description: Transaction data (our research database)
+    path: /resource-1
+  resource_2:
+    adminResource: false
+    allowedRoles:
+    - Administrator
+    description: Access tokens (sensitive)
+    path: /resource-2
 securityViewerThreshold: '0.4'
 signInRiskThreshold: '0.5'
 userIdentityWeight: '0.5'
