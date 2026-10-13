@@ -1,6 +1,12 @@
 import json
-from data_paths import TRANSACTIONS_FILE
+import os
 import random
+import sys
+
+# Make the repo root importable (for the shared cyberdome package)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from cyberdome.data_paths import TRANSACTIONS_FILE
 import string
 from datetime import datetime, timedelta
 

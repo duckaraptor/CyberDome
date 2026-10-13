@@ -5,7 +5,6 @@ from threading import Event
 sys.path.insert(0, '..') # Import the files where the modules are located
 
 from Networking import Networking
-from ZeroTrustWebUI.trust_signal_collection import *
 
 #Create an instance of this node
 node_3 = Networking("127.0.0.1", 8003, 3)

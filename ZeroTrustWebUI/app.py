@@ -2,6 +2,10 @@ import json
 import os
 import sys
 import time
+
+# Make the repo root importable (for the shared cyberdome package), wherever app.py is started from
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from flask import Flask,render_template, request, jsonify, session, url_for,redirect, make_response
 import logging
 import math
@@ -20,10 +24,8 @@ from keycloak_config import *
 from PAM import PAM
 from Keycloak_functions import *
 from PAM_Mail_Notification import send_email,send_email_to_approver
-from trust_signal_collection import store_keycloak_events,load_events_data,process_events
-from data_paths import ACCESS_REQUESTS_FILE, EVENTS_FILE, PAM_DB_FILE, POLICY_CONFIG_FILE, TOKENS_FILE, TRANSACTIONS_FILE, USER_DATA_FILE
-
-sys.path.insert(0,'..')
+from cyberdome.trust_signals import store_keycloak_events,load_events_data,process_events
+from cyberdome.data_paths import ACCESS_REQUESTS_FILE, EVENTS_FILE, PAM_DB_FILE, POLICY_CONFIG_FILE, TOKENS_FILE, TRANSACTIONS_FILE, USER_DATA_FILE
 
 logging.basicConfig(level=logging.DEBUG)
 

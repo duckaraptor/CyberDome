@@ -159,7 +159,7 @@ Most JSON and SQLite state files below are created or updated at runtime after t
 
 `scripts/runAll.sh` starts the Trust Engine, Policy Engine, and Access Proxy in dependency order. It checks ports `8001` through `8003`, monitors its child processes, and stops all three on `Ctrl+C`.
 
-All data paths come from `ZeroTrustWebUI/data_paths.py` and are built from the code's location, so they don't depend on the folder a process starts in. The Web UI still has to start from `ZeroTrustWebUI`, because Flask-OIDC reads `client_secrets.json` from the current folder. `scripts/runWebUI.sh` does that for you.
+All data paths come from `cyberdome/data_paths.py` and are built from the code's location, so they don't depend on the folder a process starts in. The Web UI still has to start from `ZeroTrustWebUI`, because Flask-OIDC reads `client_secrets.json` from the current folder. `scripts/runWebUI.sh` does that for you.
 
 ## Identity Bootstrap
 
@@ -230,6 +230,6 @@ Verify that the user has an application client role and matching records in `dat
 | `infra/keycloak/` | Seeded Keycloak realm |
 | `infra/openldap/` | OpenLDAP image and seed LDIF |
 | `ZeroTrustWebUI/app.py` | Flask routes and application workflows |
-| `ZeroTrustWebUI/TrustAlgorithm.py` | Trust-score calculations |
-| `ZeroTrustWebUI/data_paths.py` | Locations of the shared data and config files |
-| `ZeroTrustWebUI/trust_signal_collection.py` | Event processing and JSON lookups |
+| `cyberdome/trust_algorithm.py` | Trust-score calculations |
+| `cyberdome/data_paths.py` | Locations of the shared data and config files |
+| `cyberdome/trust_signals.py` | Event processing and JSON lookups |

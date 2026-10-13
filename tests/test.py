@@ -4,8 +4,7 @@ import sys
 # Make the repo root importable, wherever this script is started from
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import ZeroTrustWebUI.TrustAlgorithm as ta
-from ZeroTrustWebUI.trust_signal_collection import *
+import cyberdome.trust_algorithm as ta
 
 # Calculate overall trust score for a specific user_id, e.g.
 #   python3 tests/test.py 91e69d52-52ac-4e33-971b-62cf0542f4ba

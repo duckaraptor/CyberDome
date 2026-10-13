@@ -2,7 +2,7 @@ from datetime import datetime
 import os
 
 import yaml
-from .trust_signal_collection import get_latest_access_request, get_latest_auth_data, get_user_identity_data_by_id
+from .trust_signals import get_latest_access_request, get_latest_auth_data, get_user_identity_data_by_id
 from .data_paths import ACCESS_REQUESTS_FILE, AUTH_DATA_FILE, POLICY_CONFIG_FILE, USER_DATA_FILE
 # Function to calculate User Identity Score
 def calculate_user_identity_score(identity_data):

@@ -7,8 +7,8 @@ folder a process is started from.
 '''
 import os
 
-WEB_UI_DIR = os.path.dirname(os.path.abspath(__file__))
-REPO_ROOT = os.path.dirname(WEB_UI_DIR)
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+WEB_UI_DIR = os.path.join(REPO_ROOT, 'ZeroTrustWebUI')
 
 # Runtime data written while the app and engines run (git-ignored)
 DATA_DIR = os.path.join(REPO_ROOT, 'data')

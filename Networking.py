@@ -6,12 +6,14 @@ Uses peer to peer communication without involvement of a centralized server for 
 
 '''
 import datetime
+import json
+import os
 import traceback
 from p2pnetwork.node import Node
 import yaml
-import ZeroTrustWebUI.TrustAlgorithm as ta
-from ZeroTrustWebUI.trust_signal_collection import *
-from ZeroTrustWebUI.data_paths import ACCESS_DECISIONS_FILE, ACCESS_REQUESTS_FILE, AUTH_DATA_FILE, POLICY_CONFIG_FILE, USER_DATA_FILE
+import cyberdome.trust_algorithm as ta
+from cyberdome.trust_signals import get_latest_access_request, get_latest_auth_data, get_user_identity_data_by_id
+from cyberdome.data_paths import ACCESS_DECISIONS_FILE, ACCESS_REQUESTS_FILE, AUTH_DATA_FILE, POLICY_CONFIG_FILE, USER_DATA_FILE
 
 class Networking(Node):
     #Define a dictionary of the node roles based on their node.id attributes

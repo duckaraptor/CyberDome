@@ -4,6 +4,21 @@ This file records the changes we make to CyberDome, newest first. For each fix w
 
 ## 2026-10-13
 
+### Changed: shared code moved into a `cyberdome/` package
+
+**Why:** The trust score and the data helpers are used by both the engines and the Web UI, but they lived inside `ZeroTrustWebUI/`. The engines had to import them as `ZeroTrustWebUI.TrustAlgorithm`, and the Web UI imported the same files a different way, which needed a try/except import.
+
+**What we changed:**
+
+- Moved three files into a new `cyberdome/` package and renamed them to Python's usual `snake_case` style:
+  - `ZeroTrustWebUI/TrustAlgorithm.py` → `cyberdome/trust_algorithm.py`
+  - `ZeroTrustWebUI/trust_signal_collection.py` → `cyberdome/trust_signals.py`
+  - `ZeroTrustWebUI/data_paths.py` → `cyberdome/data_paths.py`
+- Everything now imports them as `cyberdome.*`. `app.py` and `synthetic_data.py` add the repo root to Python's import path, based on their own location and before their imports. The old `sys.path.insert(0,'..')` in `app.py` ran after the imports and depended on the start folder.
+- `Networking.py` imports the three functions it uses by name, and imports `json` and `os` itself. Before, it got them through `import *`.
+- Removed an unused `import *` from `PolicyEngine.py`.
+- No calculation changed. We checked that alice's trust score stayed at 0.609, that `app.py` loads with all 25 routes, and that a request through all three engines still returns the matching verdict.
+
 ### Changed: scripts and test files have their own folders
 
 **Why:** Five shell scripts and two test scripts were spread over the repo root and `ZeroTrustWebUI/`. Each one only worked when started from the folder it lived in.

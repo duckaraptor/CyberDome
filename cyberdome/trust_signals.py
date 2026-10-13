@@ -10,11 +10,7 @@ HANDLING PROCESSING OF AUTH_DATA
 import json
 import os
 
-# Imported as a package module by the engines, and as a plain module by the Web UI
-try:
-    from .data_paths import AUTH_DATA_FILE, EVENTS_FILE
-except ImportError:
-    from data_paths import AUTH_DATA_FILE, EVENTS_FILE
+from .data_paths import AUTH_DATA_FILE, EVENTS_FILE
 
 def calculate_sign_in_risk(auth_data):
     user_dict = {}
