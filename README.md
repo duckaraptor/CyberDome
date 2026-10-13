@@ -61,18 +61,17 @@ These credentials are for local development only. The imported `myrealm` realm c
 Start the Trust Engine, Policy Engine, and Access Proxy together:
 
 ```bash
-./runAll.sh
+./scripts/runAll.sh
 ```
 
-In a second terminal, start the Web UI from its own directory:
+In a second terminal, start the Web UI:
 
 ```bash
 source venv/bin/activate
-cd ZeroTrustWebUI
-python app.py
+./scripts/runWebUI.sh
 ```
 
-Open `http://localhost:5000`. Stop the Python services with `Ctrl+C`, then stop the identity stack with:
+The scripts in `scripts/` work from any folder. Open `http://localhost:5000`. Stop the Python services with `Ctrl+C` (the engines can take 10 to 20 seconds to stop), then stop the identity stack with:
 
 ```bash
 docker compose down

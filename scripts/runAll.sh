@@ -2,7 +2,8 @@
 
 set -u
 
-cd "$(dirname "$0")"
+# The engines run from the repo root, one level above this script
+cd "$(dirname "$0")/.."
 
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 PIDS=()

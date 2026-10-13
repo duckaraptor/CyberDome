@@ -157,9 +157,9 @@ Most JSON and SQLite state files below are created or updated at runtime after t
 | `8080` | Keycloak under the `/auth` path |
 | `8081` | phpLDAPadmin |
 
-`runAll.sh` starts the Trust Engine, Policy Engine, and Access Proxy in dependency order. It checks ports `8001` through `8003`, monitors its child processes, and stops all three on `Ctrl+C`.
+`scripts/runAll.sh` starts the Trust Engine, Policy Engine, and Access Proxy in dependency order. It checks ports `8001` through `8003`, monitors its child processes, and stops all three on `Ctrl+C`.
 
-All data paths come from `ZeroTrustWebUI/data_paths.py` and are built from the code's location, so they don't depend on the folder a process starts in. The Web UI still has to start from `ZeroTrustWebUI`, because Flask-OIDC reads `client_secrets.json` from the current folder.
+All data paths come from `ZeroTrustWebUI/data_paths.py` and are built from the code's location, so they don't depend on the folder a process starts in. The Web UI still has to start from `ZeroTrustWebUI`, because Flask-OIDC reads `client_secrets.json` from the current folder. `scripts/runWebUI.sh` does that for you.
 
 ## Identity Bootstrap
 
@@ -210,7 +210,7 @@ The discovery request should return JSON and HTTP `200`.
 lsof -nP -iTCP:8001-8003 -sTCP:LISTEN
 ```
 
-Stop old engine processes before running `./runAll.sh` again.
+Stop old engine processes before running `./scripts/runAll.sh` again.
 
 ### Login works but evaluation fails
 
@@ -224,7 +224,8 @@ Verify that the user has an application client role and matching records in `dat
 | `TrustEngine.py` | Trust Engine process, node 2 |
 | `PolicyEngine.py` | Policy Engine process, node 3 |
 | `Networking.py` | Peer routing, scoring dispatch, and policy decisions |
-| `runAll.sh` | Combined decision-engine launcher |
+| `scripts/` | Launchers: `runAll.sh` for the three engines, `runWebUI.sh` for the Web UI, and one script per engine |
+| `tests/` | Manual check scripts: `test.py` prints one user's trust score, `testAP.py` runs a stand-alone Access Proxy |
 | `compose.yml` | Local identity and database stack |
 | `infra/keycloak/` | Seeded Keycloak realm |
 | `infra/openldap/` | OpenLDAP image and seed LDIF |

@@ -1,6 +1,8 @@
+import os
 import sys
 
-sys.path.insert(0, '..') # Import the files where the modules are located
+# Make the repo root importable, wherever this script is started from
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from Networking import Networking
 

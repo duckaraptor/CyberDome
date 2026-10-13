@@ -4,6 +4,16 @@ This file records the changes we make to CyberDome, newest first. For each fix w
 
 ## 2026-10-13
 
+### Changed: scripts and test files have their own folders
+
+**Why:** Five shell scripts and two test scripts were spread over the repo root and `ZeroTrustWebUI/`. Each one only worked when started from the folder it lived in.
+
+**What we changed:**
+
+- Moved `runAll.sh`, `runAccessProxy.sh`, `runTrustEngine.sh`, `runPolicyEngine.sh` and `ZeroTrustWebUI/runWebUI.sh` to `scripts/`. Each script now moves to the folder it needs first (the repo root, or `ZeroTrustWebUI/` for the Web UI), so it works from any folder.
+- Moved `test.py` and `testAP.py` to `tests/`. They find the project code from their own location. `test.py` now takes the user ID as an argument, because its hard-coded ID belonged to a user that no longer exists.
+- We tested this by starting `scripts/runAll.sh` from an unrelated folder (all three engines came up) and running `tests/test.py` from two folders (same score).
+
 ### Changed: runtime data now lives in `data/`
 
 **Why:** The generated files were spread over the repo root and `ZeroTrustWebUI/instance/`. Each file was found by a path relative to the folder the process started in, so the Web UI had to start from `ZeroTrustWebUI/` and the engines from the repo root.
