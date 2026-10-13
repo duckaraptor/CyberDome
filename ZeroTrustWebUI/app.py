@@ -225,25 +225,10 @@ def home():
     except KeycloakAuthenticationError as e:
         print(f"KeycloakAuthenticationError: {e}")
         return redirect(url_for('index'))
-    
 
-# Define the path to the parent directory where the JSON file is stored
-parent_directory = os.path.abspath(os.path.join(os.getcwd(), os.pardir))
 
-# Define the path to the access_decision.json file
-file_path = os.path.join(parent_directory, 'access_decision.json')
-
-# Function to get the latest access decision data from the JSON file
-def get_latest_access_decision():
-    latest_decision = None
-    
-    if os.path.exists(file_path):
-        with open(file_path, 'r') as file:
-            access_decisions = json.load(file)
-            if access_decisions:
-                latest_decision = max(access_decisions, key=lambda x: x['ID'])
-    
-    return latest_decision
+# Seconds to wait for the Policy Engine's verdict before denying access
+ACCESS_DECISION_TIMEOUT = 10
 
 #route to receive an access request and forward it to the AP
 @app.route('/receive-access-request', methods = ['POST'])
@@ -295,18 +280,26 @@ def receive_and_process_access_request():
     #first create an instance of the Networking class
     node4 = Networking("127.0.0.1",8004,4)
     node4.start()
-    node4.connect_with_node('127.0.0.1',8001) #connect with the access proxy
-    node4.connect_with_node('127.0.0.1',8003) # connect with the policy engine
-    node4.send_message_to_node('1',access_request)  #send access request to access proxy
+    try:
+        node4.connect_with_node('127.0.0.1',8001) #connect with the access proxy
+        node4.connect_with_node('127.0.0.1',8003) # connect with the policy engine
+        node4.send_message_to_node('1',access_request)  #send access request to access proxy
 
-    access_decision = get_latest_access_decision()
+        # Wait for the verdict for this request, not whatever was decided last
+        access_decision = node4.wait_for_access_decision(access_request['ID'], ACCESS_DECISION_TIMEOUT)
+    finally:
+        node4.stop()
+
     print(access_decision)
+
+    if access_decision is None:
+        # Fail closed: no verdict means no access
+        print(f"No verdict for access request {access_request['ID']} within {ACCESS_DECISION_TIMEOUT}s")
+        return jsonify({'verdict': 0, 'error': 'No access decision received'}), 504
 
     policy_engine_verdict = access_decision.get('access_decision')
 
     print(f"Policy Engine Verdict: {policy_engine_verdict}")
-
-    node4.stop()
 
     # Communicate to the frontend that the access request has been verified
     response_data = {'verdict': policy_engine_verdict}

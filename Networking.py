@@ -74,6 +74,7 @@ class Networking(Node):
             print(f"Sending the subject's trust score to Policy Engine for policy validation...")
             data = {
                 'user_id': user_id,
+                'request_id': message.get('request_id'),
                 'intent': 'request_access_decision',
                 'user_trust_score': user_trust_score
             }
@@ -172,6 +173,7 @@ class Networking(Node):
              # Prepare the access decision data
             access_decision_data = {
                 'ID': new_id,
+                'request_id': message.get('request_id'),
                 'user_id': user_id,
                 'intent': 'request_access_decision',
                 'user_trust_score': user_trust_score,
@@ -200,6 +202,8 @@ class Networking(Node):
 
             data = {
                 'user_id': user_id,
+                # Carried through to the verdict so the Web UI can match it to this request
+                'request_id': message.get('ID'),
                 'intent': intent
             }
             self.send_message_to_node('2',data)

@@ -2,6 +2,12 @@
 
 This file records development changes made while preparing and running CyberDome locally. Runtime-generated data is listed separately from intentional source and configuration changes.
 
+## 2026-10-12
+
+### Fixed
+
+- The Web UI now returns the verdict for the request it sent, instead of the newest entry in `access_decision.json`. The access request `ID` is passed through the engines as `request_id`, and node 4 waits up to 10 seconds for the matching verdict. With no verdict, access is denied (`504`, verdict `0`). This also fixes the crash on the first access request of a fresh setup.
+
 ## 2026-10-11
 
 ### Added

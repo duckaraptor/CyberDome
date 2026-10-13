@@ -57,9 +57,9 @@ The application recognizes the Keycloak client roles `Approver`, `Security Viewe
 6. The Trust Engine loads the user's latest identity, authentication, and request records.
 7. The Trust Engine sends its score to the Policy Engine on port `8003`.
 8. The Policy Engine applies `policyConfiguration.yml`, writes `access_decision.json`, and sends the verdict to node 4.
-9. Flask returns the latest verdict to the browser.
+9. Node 4 waits up to 10 seconds for the verdict carrying this request's ID, and Flask returns it to the browser. If none arrives, Flask denies access (`504`, verdict `0`).
 
-Messages are Python dictionaries wrapped with a sender ID and exchanged by `p2pnetwork` over localhost TCP connections.
+The access request's `ID` travels through the engines as `request_id`, so each verdict can be matched to its request. Messages are Python dictionaries wrapped with a sender ID and exchanged by `p2pnetwork` over localhost TCP connections.
 
 ## Trust Calculation
 
@@ -185,7 +185,7 @@ This command destroys all local identity data.
 
 - Local peer traffic is unauthenticated and unencrypted.
 - JSON files are shared mutable state without locking or transactions.
-- The Web UI reads the latest decision immediately after sending a peer message, creating a possible timing race.
+- Each request starts node 4 on port `8004`, so two simultaneous access requests clash on that port.
 - Keycloak event collection currently requests a fixed 2023 date range.
 - Trust scoring expects complete identity, authentication, and request records plus a numeric account timestamp.
 - Users without a recognized client role are not explicitly denied by current role-threshold logic.

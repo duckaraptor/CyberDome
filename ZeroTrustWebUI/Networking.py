@@ -7,6 +7,7 @@ Uses peer to peer communication without involvement of a centralized server for 
 '''
 
 import json
+import threading
 from p2pnetwork.node import Node
 
 class Networking(Node):
@@ -21,19 +22,21 @@ class Networking(Node):
     # Python class constructor to initialize the class Networking
     def __init__(self, host, port, id=None, callback=None, max_connections=0):
         super(Networking, self).__init__(host, port, id, callback, max_connections)
-        self.received_message = None
+        # Verdicts from the Policy Engine, keyed by access request ID
+        self.access_decisions = {}
+        self.access_decision_received = threading.Condition()
         print(f"\n{self.get_node_role(self.id)} STARTED on {self.host}:{self.port}")
-    
+
     #Define a function to extract the name of a node based on it's node.id attribute
     def get_node_role(self,node_id):
         return self.NODE_ROLE.get(node_id,'UNKNOWN ROLE')
-    
-    def set_received_message(self, message):
-        self.received_message = message  # Setter method to initialize the variable with the message
 
-    def get_received_message(self):
-        return self.received_message  # Getter method to retrieve the message set by the setter
-    
+    def wait_for_access_decision(self, request_id, timeout):
+        # Block until the Policy Engine's verdict for this request arrives; None on timeout
+        with self.access_decision_received:
+            self.access_decision_received.wait_for(lambda: request_id in self.access_decisions, timeout)
+            return self.access_decisions.pop(request_id, None)
+
 
     def send_message_to_node(self, node_id, message):
         # Find the specific node by its ID
@@ -79,7 +82,9 @@ class Networking(Node):
 
     def process_message_from_policy_engine(self, sender, message):
         print(f"Received a message from Policy Engine Node [{sender}]: {message}")
-        self.set_received_message(message)
+        with self.access_decision_received:
+            self.access_decisions[message.get('request_id')] = message
+            self.access_decision_received.notify_all()
 
 
     def process_message_from_web_ui(self, sender, message):
