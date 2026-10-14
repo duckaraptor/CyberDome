@@ -12,6 +12,7 @@ import os
 from datetime import datetime, timedelta
 
 from .data_paths import AUTH_DATA_FILE, EVENTS_FILE
+from .jsonl import read_records_backwards
 
 # How many of the user's most recent login attempts count for the sign-in success rate
 LOGIN_HISTORY_SIZE = 10
@@ -129,10 +130,15 @@ def store_keycloak_events(keycloak_admin):
             'ip_address': event.get('ipAddress', None)
         }
 
+        # For failed logins: why it failed (for example invalid_user_credentials), for the audit log
+        cleaned_event['error'] = event.get('error', None)
+
         if 'details' in event:
             details = event['details']
             cleaned_event['auth_type'] = details.get('auth_type', None)
             cleaned_event['token_id'] = details.get('token_id', None)
+            # The username that was typed, also when it doesn't exist (then user_id is empty)
+            cleaned_event['username'] = details.get('username', None)
 
         cleaned_event['session_id'] = event.get('sessionId', None)
 
@@ -174,16 +180,11 @@ def store_keycloak_events(keycloak_admin):
 #get the latest access request data for a particular user_id
 
 def get_latest_access_request(user_id, access_requests):
-    with open(access_requests, 'r') as file:
-        data = json.load(file)
-
-    latest_request = None
-    for request in data:
-        if request['user_id'] == user_id:
-            if latest_request is None or request['access_request_time'] > latest_request['access_request_time']:
-                latest_request = request
-
-    return latest_request
+    # The user's newest access request in data/access_requests.jsonl, or None
+    for request in read_records_backwards(access_requests):
+        if request.get('user_id') == user_id:
+            return request
+    return None
 
 #get the latest auth data for the particular user_id
 def get_latest_auth_data(user_id, auth_data):
@@ -223,21 +224,20 @@ def get_sign_in_success_rate(user_id, auth_data_file=AUTH_DATA_FILE):
 
 def count_recent_access_requests(user_id, request_time, minutes, access_requests_file, exclude_id=None):
     # How many access requests the user sent in the `minutes` before request_time (a 'YYYY-MM-DD HH:MM:SS' string).
-    # The request being scored (exclude_id) isn't counted.
-    try:
-        with open(access_requests_file, 'r') as file:
-            data = json.load(file)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return 0
+    # The request being scored (exclude_id) isn't counted. The file is read from the end, and reading stops at
+    # requests that are clearly older than the window, so it doesn't load the whole file.
     end = datetime.strptime(request_time, '%Y-%m-%d %H:%M:%S')
     start = end - timedelta(minutes=minutes)
+    stop_before = start - timedelta(minutes=1)  # requests sent at the same moment can be a little out of order
     count = 0
-    for request in data:
-        if request.get('user_id') != user_id or (exclude_id is not None and request.get('ID') == exclude_id):
-            continue
+    for request in read_records_backwards(access_requests_file):
         try:
             sent = datetime.strptime(request.get('access_request_time', ''), '%Y-%m-%d %H:%M:%S')
         except ValueError:
+            continue
+        if sent < stop_before:
+            break
+        if request.get('user_id') != user_id or (exclude_id is not None and request.get('ID') == exclude_id):
             continue
         if start <= sent <= end:
             count += 1

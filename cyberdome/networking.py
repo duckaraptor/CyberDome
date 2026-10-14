@@ -21,7 +21,8 @@ from p2pnetwork.node import Node
 from . import trust_algorithm as ta
 from . import policy
 from .trust_signals import get_latest_access_request, get_sign_in_success_rate
-from .data_paths import ACCESS_DECISIONS_FILE, ACCESS_REQUESTS_FILE
+from . import audit
+from .data_paths import ACCESS_REQUESTS_FILE
 
 ACCESS_PROXY_ID = '1'
 TRUST_ENGINE_ID = '2'
@@ -269,48 +270,29 @@ class PolicyEngineNode(Networking):
 
             print(f"Policy Engine Verdict: {decision['decision']} by {decision['policy_id']} {decision['policy_name']} ({decision['reason']})")
 
-            file_path = ACCESS_DECISIONS_FILE
+            # Log the decision before sending it, so access is never given without an audit entry
+            entry = audit.log_decision(decision['outcome'], decision['reason'], 'Policy Engine', request=access_request,
+                                       decision=decision, trust_score=user_trust_score,
+                                       trust_factors=message.get('trust_factors'))
 
-            # Check if the file exists to determine the initial ID
-            if os.path.exists(file_path):
-                with open(file_path, 'r') as file:
-                    access_decisions = json.load(file)
-                    if access_decisions:
-                        last_entry = access_decisions[-1]
-                        new_id = last_entry['ID'] + 1
-                    else:
-                        new_id = 1
-            else:
-                access_decisions = []
-                new_id = 1
-
-            # Prepare the access decision data
+            # The decision for the Web UI: what it needs to serve or refuse the page
             access_decision_data = {
-                'ID': new_id,
                 'request_id': message.get('request_id'),
                 'user_id': user_id,
                 'resource': access_request.get('resource'),
                 'action': access_request.get('action'),
                 'intent': 'request_access_decision',
-                'user_trust_score': user_trust_score,
-                'trust_factors': message.get('trust_factors'),
                 'access_decision': decision['access_decision'],
                 'decision': decision['decision'],
                 'outcome': decision['outcome'],
                 'policy_id': decision['policy_id'],
                 'policy_name': decision['policy_name'],
                 'reason': decision['reason'],
+                'user_trust_score': user_trust_score,
+                'trust_score': user_trust_score,
                 'decided_by': 'Policy Engine',
-                'decided_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                'decided_at': entry['time'],
             }
-
-            # Save the decision before sending it, so it is logged before access is given.
-            # Write to a temporary file and swap it in, so nobody ever reads a half-written file.
-            access_decisions.append(access_decision_data)
-            temporary_path = file_path + '.tmp'
-            with open(temporary_path, 'w') as file:
-                json.dump(access_decisions, file, indent=4)
-            os.replace(temporary_path, file_path)
 
             self.send_message_to_node(WEB_UI_ID,access_decision_data)
 

@@ -11,6 +11,7 @@ from flask import Blueprint, make_response, redirect, render_template, session, 
 from keycloak import KeycloakAuthenticationError
 
 from cyberdome.access_rules import is_role_allowed
+from cyberdome import audit
 from cyberdome.data_paths import EVENTS_FILE, USER_DATA_FILE
 from cyberdome.trust_signals import load_events_data, process_events, store_keycloak_events
 from extensions import keycloak_admin, keycloak_openid, oidc
@@ -90,6 +91,8 @@ def home():
                     # Process event data to yield the auth_data
                     if events_data:
                         process_events(events_data)
+                        # Copy new failed logins into the audit log (AUTHENTICATION_FAILURE)
+                        audit.import_keycloak_login_errors(events_data)
                     else:
                         print("Failed to load events data.")
 

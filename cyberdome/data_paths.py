@@ -14,8 +14,11 @@ WEB_UI_DIR = os.path.join(REPO_ROOT, 'web')
 DATA_DIR = os.path.join(REPO_ROOT, 'data')
 os.makedirs(DATA_DIR, exist_ok=True)
 
-ACCESS_REQUESTS_FILE = os.path.join(DATA_DIR, 'access_requests.json')
-ACCESS_DECISIONS_FILE = os.path.join(DATA_DIR, 'access_decision.json')
+# One JSON object per line, only appended (see cyberdome/jsonl.py and docs/audit-log.md).
+# The older access_requests.json and access_decision.json are no longer written.
+ACCESS_REQUESTS_FILE = os.path.join(DATA_DIR, 'access_requests.jsonl')
+AUDIT_LOG_FILE = os.path.join(DATA_DIR, 'audit.log')
+KEYCLOAK_AUDIT_STATE_FILE = os.path.join(DATA_DIR, 'keycloak_audit_state.json')
 AUTH_DATA_FILE = os.path.join(DATA_DIR, 'auth_data.json')
 EVENTS_FILE = os.path.join(DATA_DIR, 'events.json')
 USER_DATA_FILE = os.path.join(DATA_DIR, 'user_data.json')

@@ -55,7 +55,9 @@ logging.disable(logging.CRITICAL)
 
 import app as web_app  # noqa: E402  (needs the paths above)
 from cyberdome.access_rules import is_role_allowed, may_write  # noqa: E402
-from cyberdome.data_paths import ACCESS_DECISIONS_FILE, ACCESS_REQUESTS_FILE  # noqa: E402
+from cyberdome import audit  # noqa: E402
+from cyberdome.data_paths import ACCESS_REQUESTS_FILE  # noqa: E402
+from cyberdome.jsonl import read_records_backwards  # noqa: E402
 from cyberdome.settings import KEYCLOAK_CLIENT_ID, KEYCLOAK_CLIENT_SECRET  # noqa: E402
 from keycloak_config import REVOCATION_URL, TOKEN_URL  # noqa: E402
 from proxy_client import stop_node  # noqa: E402
@@ -124,13 +126,17 @@ def mediated(response):
 
 
 def saved_decision(request_id):
-    with open(ACCESS_DECISIONS_FILE) as file:
-        return next((d for d in json.load(file) if str(d.get('request_id')) == str(request_id)), None)
+    # The Policy Engine's entry for this request in the audit log (data/audit.log)
+    return audit.find_entry(request_id)
 
 
 def saved_request(request_id):
-    with open(ACCESS_REQUESTS_FILE) as file:
-        return next((r for r in json.load(file) if str(r.get('ID')) == str(request_id)), None)
+    return next((r for r in read_records_backwards(ACCESS_REQUESTS_FILE) if str(r.get('ID')) == str(request_id)), None)
+
+
+def newest_audit_entry():
+    entries = audit.read_entries(limit=1)
+    return entries[0] if entries else {}
 
 
 def device_cookie(response):
@@ -189,8 +195,12 @@ def main():
     request_id = response.headers.get('X-CyberDome-Request-Id')
     decision = saved_decision(request_id)
     check(f"bob GET /resource-1 directly is mediated (request {request_id})", mediated(response))
-    check("the decision is in data/access_decision.json with a trust score, a policy and a reason",
-          bool(decision and decision.get('reason') and decision.get('policy_id') and decision.get('user_trust_score') is not None),
+    check("the decision is in the audit log with a trust score, a policy and a reason",
+          bool(decision and decision.get('reason') and decision.get('policy_id') and decision.get('trust_score') is not None),
+          f"saved decision: {decision}")
+    data_model = ('user', 'role', 'resource', 'action', 'device_id', 'source_ip', 'decision', 'trust_score', 'reason')
+    check("the audit entry has the task's data model fields (section 4)",
+          bool(decision) and all(decision.get(field) is not None for field in data_model) and decision.get('user') == 'bob',
           f"saved decision: {decision}")
     check("the saved decision has the trust breakdown (7 factors)", len((decision or {}).get('trust_factors') or {}) == 7,
           f"saved decision: {decision}")
@@ -231,17 +241,28 @@ def main():
     for method, path in [(m, p) for _, m, p in ROLE_PROTECTED] + [('GET', p) for p in LOGIN_ONLY]:
         response = call(anonymous, method, path)
         check(f"anonymous {method:4} {path:30} expect login redirect", is_login_redirect(response), f"got {response.status_code}")
+    entry = newest_audit_entry()
+    check("not logged in: logged as AUTHENTICATION_FAILURE by the Web UI, with the page and source IP",
+          entry.get('outcome') == 'AUTHENTICATION_FAILURE' and entry.get('decided_by') == 'Web UI'
+          and entry.get('path') == LOGIN_ONLY[-1] and entry.get('source_ip') == '127.0.0.1', f"newest entry: {entry}")
 
     print("\n== Invalid and revoked tokens (scenario 3): 401, the resource is not reached")
     fake = dict(get_token('charlie'), access_token='not-a-real-token')
     response = call(client_for(fake, 'charlie'), 'GET', '/resource-2')
     check("fake token      GET /resource-2 expect 401", response.status_code == 401, f"got {response.status_code}")
+    entry = newest_audit_entry()
+    check("fake token: logged as AUTHENTICATION_FAILURE for resource_2",
+          entry.get('outcome') == 'AUTHENTICATION_FAILURE' and entry.get('resource') == 'resource_2', f"newest entry: {entry}")
 
     token = get_token('charlie')
     revoked = requests.post(REVOCATION_URL, data={'client_id': KEYCLOAK_CLIENT_ID, 'client_secret': KEYCLOAK_CLIENT_SECRET,
                                                   'refresh_token': token['refresh_token']})
     response = call(client_for(token, 'charlie'), 'GET', '/resource-2')
     check(f"revoked token   GET /resource-2 expect 401 (logout returned {revoked.status_code})", response.status_code == 401, f"got {response.status_code}")
+    entry = newest_audit_entry()
+    check("revoked token: logged as AUTHENTICATION_FAILURE, with the user the session belongs to",
+          entry.get('outcome') == 'AUTHENTICATION_FAILURE' and entry.get('user') == 'charlie'
+          and 'revoked' in (entry.get('reason') or ''), f"newest entry: {entry}")
 
     print("\n== Several requests at the same time each get their own verdict")
     answers = []
@@ -290,6 +311,15 @@ def main():
     policy_id = response.headers.get('X-CyberDome-Policy')
     check(f"Separation of duties: foo (Policy Administrator) passes P2 for saving policies -> {response.headers.get('X-CyberDome-Decision')} ({policy_id})",
           mediated(response) and policy_id in ('P6', 'P4', 'P5'), f"got {response.status_code}, policy {policy_id}")
+
+    print("\n== Audit log page (section 3.5)")
+    response = call(clients['charlie'], 'GET', '/logging?outcome=POLICY_VIOLATION')
+    page = response.get_data(as_text=True)
+    check("charlie (Administrator) opens /logging filtered on POLICY_VIOLATION -> the page lists those entries",
+          response.status_code == 200 and 'POLICY_VIOLATION' in page and 'may not access' in page, f"got {response.status_code}")
+    response = call(clients['bob'], 'GET', '/logging')
+    check("bob (Researcher) may not open the audit log -> 403 by P2",
+          response.status_code == 403 and response.headers.get('X-CyberDome-Policy') == 'P2')
 
     passed = sum(results)
     print(f"\n{passed}/{len(results)} checks passed")

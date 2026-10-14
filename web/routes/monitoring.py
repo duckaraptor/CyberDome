@@ -1,28 +1,40 @@
 '''
 
-Logging and monitoring: lists the access requests the Web UI has received.
+Logging and monitoring: shows the audit log (data/audit.log), newest first.
+See docs/audit-log.md.
 
 '''
-import json
-import os
-
-from flask import Blueprint, render_template
+from flask import Blueprint, render_template, request
 
 from authz import protected_resource
-from cyberdome.data_paths import ACCESS_REQUESTS_FILE
+from cyberdome import audit
+from cyberdome.data_paths import EVENTS_FILE
+from cyberdome.trust_signals import load_events_data, store_keycloak_events
+from extensions import keycloak_admin
 
 bp = Blueprint('monitoring', __name__)
+
+PAGE_SIZE = 200
+
+
+def sync_failed_logins():
+    # Fetch Keycloak's newest events and copy new failed logins into the audit log.
+    # If Keycloak can't be reached, the page still shows what is already in the log.
+    try:
+        store_keycloak_events(keycloak_admin)
+        audit.import_keycloak_login_errors(load_events_data(EVENTS_FILE) or [])
+    except Exception as e:
+        print(f"Could not sync failed logins from Keycloak: {e}")
 
 
 @bp.route('/logging')
 @protected_resource('logging')
 def access_requests():
-    file_path = ACCESS_REQUESTS_FILE
-    access_requests_data = []
-
-    # The file is created by the first access request
-    if os.path.exists(file_path):
-        with open(file_path, 'r') as file:
-            access_requests_data = json.load(file)
-
-    return render_template('logging_and_monitoring.html', access_requests=access_requests_data)
+    sync_failed_logins()
+    outcome = request.args.get('outcome') or None
+    user = request.args.get('user') or None
+    if outcome not in audit.OUTCOMES:
+        outcome = None
+    entries = audit.read_entries(limit=PAGE_SIZE, outcome=outcome, user=user)
+    return render_template('logging_and_monitoring.html', entries=entries, outcomes=audit.OUTCOMES,
+                           selected_outcome=outcome or '', selected_user=user or '', page_size=PAGE_SIZE)

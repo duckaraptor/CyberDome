@@ -155,9 +155,9 @@ def test_recent_requests_are_counted_per_user_and_window():
         {'ID': 5, 'user_id': 'bob', 'access_request_time': '2026-10-14 12:00:00'},  # the request being scored
     ]
     with tempfile.TemporaryDirectory() as folder:
-        path = os.path.join(folder, 'access_requests.json')
+        path = os.path.join(folder, 'access_requests.jsonl')
         with open(path, 'w') as file:
-            json.dump(requests, file)
+            file.writelines(json.dumps(request) + '\n' for request in requests)  # one request per line
         assert count_recent_access_requests('bob', '2026-10-14 12:00:00', 5, path, exclude_id=5) == 2
 
 

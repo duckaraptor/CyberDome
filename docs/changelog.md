@@ -4,6 +4,35 @@ This file records the changes we make to CyberDome, newest first. For each fix w
 
 ## 2026-10-14
 
+### Added: one audit log for every access decision (assignment section 3.5)
+
+Branch: `feat-audit-logging`. The log and the reasons behind it are in `docs/audit-log.md`.
+
+**What we saw:** Only the Policy Engine's decisions were saved, in `data/access_decision.json`. Failed logins, invalid or revoked tokens, visitors who weren't logged in, and requests that failed because the engines were down left no trace. Every request read and rewrote `data/access_decision.json` and `data/access_requests.json` in full, so each request got slower as the files grew: after many test runs (about 1 MB), 45 ms instead of 21 ms.
+
+**What we changed:**
+
+- New `cyberdome/audit.py`: writes audit entries to `data/audit.log`, one JSON object per line, only appended. Each entry has the task's data model fields (`user`, `role`, `resource`, `action`, `device_id`, `source_ip`, `decision`, `trust_score`, `reason`), plus the outcome category (`ALLOW`, `DENY`, `AUTHENTICATION_FAILURE`, `POLICY_VIOLATION`), the policy, who decided, the trust breakdown and the context.
+- New `cyberdome/jsonl.py`: appends to one-JSON-object-per-line files with a file lock (the Web UI and the engines are separate processes), hands out the next ID under the same lock, and reads files backwards from the end.
+- The Policy Engine writes each decision to the audit log before sending it. It no longer writes `data/access_decision.json`.
+- The Web UI logs its own decisions: not logged in (`AUTHENTICATION_FAILURE`), an invalid, expired or revoked token (`AUTHENTICATION_FAILURE`), and Keycloak or the engines not reachable or too slow (`DENY`).
+- Failed logins: Keycloak's `LOGIN_ERROR` events are copied into the audit log as `AUTHENTICATION_FAILURE`, when the home page or the `/logging` page syncs events. The event sync now keeps the typed username and Keycloak's error (for example `invalid_user_credentials`). `data/keycloak_audit_state.json` remembers the newest copied event, so none is copied twice.
+- The access requests moved to `data/access_requests.jsonl`, also append-only. The access frequency factor reads it from the end and stops at requests older than the window.
+- The `/logging` page shows the audit log, newest first, with filters for outcome and user, and the trust breakdown per entry.
+- The old `data/access_decision.json` and `data/access_requests.json` stay in `data/` untouched, and are no longer written.
+- New `tests/test_audit.py`: 15 tests, for example reading backwards across blocks, unique IDs from 20 threads at once, the data model fields, the filters, and copying failed logins only once. All 15 passed.
+- `tests/check_access_control.py` reads decisions from the audit log, and checks the data model fields, the `AUTHENTICATION_FAILURE` entries for a visitor who isn't logged in and for fake and revoked tokens, and the `/logging` page. All 78 checks passed.
+- Docs: new `docs/audit-log.md`, and an Audit Log section in `docs/how-it-works.md`.
+
+**Performance:** we measured the median time per request in `tests/check_access_control.py` (10 requests by bob on Resource 1):
+
+| Files | Before (JSON files rewritten) | After (append-only) |
+| --- | --- | --- |
+| Small (new files) | about 21 ms | about 17 to 19 ms |
+| About 1.3 MB | about 45 ms | about 18 ms |
+
+For the 1.3 MB test we filled copies of the new files with entries dated one day earlier, ran the test, and put the real files back. With append-only files the time no longer grows with the amount of data.
+
 ### Added: six named policies in the Policy Engine (assignment section 3.4)
 
 Branch: `feat-policy-engine`. The policies and the reasons behind them are in `docs/policies.md`.

@@ -2,75 +2,138 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Access Requests</title>
+    <title>Audit Log</title>
     <style>
         body {
             font-family: Arial, sans-serif;
             margin: 0;
-            padding: 0;
+            padding: 0 20px;
             background-color: #f5f5f5;
         }
 
         h1 {
             text-align: center;
-            margin-bottom: 20px;
+            margin-bottom: 5px;
+        }
+
+        .hint {
+            text-align: center;
+            color: #666;
+            margin-bottom: 15px;
+        }
+
+        form {
+            text-align: center;
+            margin-bottom: 10px;
+        }
+
+        form select, form input, form button {
+            padding: 6px;
+            margin: 0 4px;
         }
 
         table {
             width: 100%;
             border-collapse: collapse;
             border-spacing: 0;
-            margin: 20px auto;
-            overflow-x: auto;
+            margin: 10px auto 30px;
+            background-color: #fff;
         }
 
         th, td {
             border: 1px solid #ddd;
-            padding: 8px;
+            padding: 6px 8px;
             text-align: left;
-            white-space: nowrap;
+            vertical-align: top;
+            font-size: 14px;
         }
 
         th {
             background-color: #f2f2f2;
+            white-space: nowrap;
         }
 
-        tbody tr:nth-child(even) {
-            background-color: #f9f9f9;
+        .outcome {
+            font-weight: bold;
+            white-space: nowrap;
+        }
+
+        .ALLOW { color: #2e7d32; }
+        .DENY { color: #e65100; }
+        .AUTHENTICATION_FAILURE { color: #c62828; }
+        .POLICY_VIOLATION { color: #6a1b9a; }
+
+        details summary {
+            cursor: pointer;
+            color: #1565c0;
+        }
+
+        .small {
+            font-size: 12px;
+            color: #555;
         }
     </style>
 </head>
 <body>
-    <h1>Access Requests</h1>
-    <table border="1">
+    <h1>Audit Log</h1>
+    <div class="hint">Every access decision, newest first (at most {{ page_size }} entries). See docs/audit-log.md.</div>
+
+    <form method="get" action="/logging">
+        <select name="outcome">
+            <option value="">All outcomes</option>
+            {% for outcome in outcomes %}
+            <option value="{{ outcome }}" {% if outcome == selected_outcome %}selected{% endif %}>{{ outcome }}</option>
+            {% endfor %}
+        </select>
+        <input type="text" name="user" placeholder="Username or user ID" value="{{ selected_user }}">
+        <button type="submit">Filter</button>
+        <a href="/logging">Clear</a>
+    </form>
+
+    <table>
         <thead>
             <tr>
-                <th>ID</th>
-                <th>User ID</th>
-                <th>Resource Requested</th>
-                <th>Access Request Time</th>
+                <th>Time</th>
+                <th>Outcome</th>
+                <th>Policy</th>
+                <th>User</th>
+                <th>Role</th>
+                <th>Resource</th>
+                <th>Action</th>
+                <th>Trust score</th>
                 <th>Source IP</th>
-                <th>Location</th>
-                <th>Device Type</th>
-                <th>Device ID</th>
-                <th>New Device</th>
-                <th>Device OS</th>
+                <th>Device</th>
+                <th>Decided by</th>
+                <th>Reason</th>
             </tr>
         </thead>
         <tbody>
-            {% for request in access_requests %}
+            {% for entry in entries %}
             <tr>
-                <td>{{ request['ID'] }}</td>
-                <td>{{ request['user_id'] }}</td>
-                <td>{{ request['resource_requested'] }}</td>
-                <td>{{ request['access_request_time'] }}</td>
-                <td>{{ request['source_ip'] }}</td>
-                <td>{{ request['location'] }}</td>
-                <td>{{ request['device_type'] }}</td>
-                <td>{{ request['device_id'] }}</td>
-                <td>{{ request['new_device'] }}</td>
-                <td>{{ request['device_OS'] }}</td>
+                <td>{{ entry.get('time') }}</td>
+                <td class="outcome {{ entry.get('outcome') }}">{{ entry.get('outcome') }}</td>
+                <td>{{ entry.get('policy_id') or '' }}{% if entry.get('policy_name') %}<div class="small">{{ entry.get('policy_name') }}</div>{% endif %}</td>
+                <td>{{ entry.get('user') or '' }}</td>
+                <td>{{ entry.get('role') or '' }}</td>
+                <td>{{ entry.get('resource') or '' }}<div class="small">{{ entry.get('path') or '' }}</div></td>
+                <td>{{ entry.get('action') or '' }}</td>
+                <td>
+                    {% if entry.get('trust_score') is not none %}
+                    <details>
+                        <summary>{{ '%.2f' % entry.get('trust_score') }}</summary>
+                        {% for factor, details in (entry.get('trust_factors') or {}).items() %}
+                        <div class="small">{{ factor }}: {{ details.get('score') }} ({{ details.get('reason') }})</div>
+                        {% endfor %}
+                    </details>
+                    {% endif %}
+                </td>
+                <td>{{ entry.get('source_ip') or '' }}<div class="small">{{ entry.get('location') or '' }}</div></td>
+                <td class="small">{{ (entry.get('device_id') or '')[:8] }}{% if entry.get('new_device') %} (new){% endif %}</td>
+                <td>{{ entry.get('decided_by') }}</td>
+                <td>{{ entry.get('reason') }}</td>
             </tr>
+            {% else %}
+            <tr><td colspan="12">No entries yet.</td></tr>
             {% endfor %}
         </tbody>
     </table>

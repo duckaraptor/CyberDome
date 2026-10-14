@@ -57,11 +57,11 @@ User -> Authentication -> Access Proxy -> Trust Engine -> Policy Engine -> Allow
 
 1. The user opens a protected page, for example `/resource-1`.
 2. `@protected_resource` (`web/authz.py`) checks the login and asks Keycloak whether the token is still active. Otherwise: login redirect or `401`.
-3. The Web UI builds the request record on the server (`web/request_context.py`, see Request Record below): user, roles, resource, action, time, authentication status, source IP and its location, device ID, and device type, OS and browser. It appends the record to `data/access_requests.json` with a new `ID`.
+3. The Web UI builds the request record on the server (`web/request_context.py`, see Request Record below): user, roles, resource, action, time, authentication status, source IP and its location, device ID, and device type, OS and browser. It appends the record to `data/access_requests.jsonl` (one record per line) with a new `ID`.
 4. The Web UI's node 4 (`web/proxy_client.py`, one node shared by all requests on port `8004`) sends the record to the Access Proxy on port `8001`.
 5. The Access Proxy checks the record is complete (ID, user, resource, action, authentication status), stamps it as mediated, and forwards the whole record to the Trust Engine on port `8002`. An incomplete record is rejected with a reason.
 6. The Trust Engine scores this request and sends the record, the score and its breakdown to the Policy Engine on port `8003`. If scoring fails, it sends the error instead.
-7. The Policy Engine applies the policies P1 to P6 (see Policy Decision below), writes the decision (with resource, action, trust score and breakdown, policy, outcome and reason) to `data/access_decision.json`, and sends it to node 4.
+7. The Policy Engine applies the policies P1 to P6 (see Policy Decision below), writes the decision to the audit log `data/audit.log` (with the request, trust score and breakdown, policy, outcome and reason, see Audit Log below), and only then sends it to node 4.
 8. The page runs only if the decision is allow. Otherwise the user sees `403` with the policy and the reason. No verdict within 10 seconds gives `504`, and an unreachable Access Proxy gives `503`. Both deny access.
 
 The response carries `X-CyberDome-Request-Id`, `X-CyberDome-Decision`, `X-CyberDome-Decided-By` and `X-CyberDome-Policy` headers, so each page can be traced to its decision.
@@ -144,14 +144,30 @@ The Web UI also has a separate privileged-access workflow:
 
 The threshold is currently calculated as 80 percent of the available approvers.
 
+## Audit Log
+
+Every access decision is written to `data/audit.log`, one JSON entry per line, and shown on the `/logging` page (Administrator and Security Viewer):
+
+| Decided by | Events | Outcome |
+| --- | --- | --- |
+| Policy Engine | Every decision on a protected page | `ALLOW`, `DENY`, `AUTHENTICATION_FAILURE` or `POLICY_VIOLATION` |
+| Web UI | Not logged in, invalid or revoked token | `AUTHENTICATION_FAILURE` |
+| Web UI | Keycloak or the engines can't be reached, or don't answer in time | `DENY` |
+| Keycloak | Failed logins (`LOGIN_ERROR` events) | `AUTHENTICATION_FAILURE` |
+
+Each entry has the task's data model fields (`user`, `role`, `resource`, `action`, `device_id`, `source_ip`, `decision`, `trust_score`, `reason`), plus the policy, who decided, the trust breakdown and the context. The details and the reasons are in [audit-log.md](audit-log.md).
+
 ## State And Data
 
 Most JSON and SQLite state files below are created or updated at runtime after their corresponding workflow is used.
 
 | Path | Contents |
 | --- | --- |
-| `data/access_requests.json` | Context submitted by the Web UI |
-| `data/access_decision.json` | Policy verdicts and trust scores |
+| `data/access_requests.jsonl` | The access requests from the Web UI, one per line, only appended |
+| `data/audit.log` | The audit log: every access decision, one JSON entry per line, only appended (see `audit-log.md`) |
+| `data/keycloak_audit_state.json` | The newest Keycloak event already copied into the audit log |
+| `data/known_devices.json` | The devices each user was allowed access from |
+| `data/access_requests.json`, `data/access_decision.json` | Older formats, no longer written |
 | `data/auth_data.json` | Processed authentication events and sign-in values |
 | `data/events.json` | Raw events collected from Keycloak |
 | `data/user_data.json` | Normalized Keycloak identities and application roles |
@@ -228,7 +244,7 @@ Stop old engine processes before running `./scripts/runAll.sh` again.
 
 ### Login works but evaluation fails
 
-Verify that the user has an application client role and matching records in `data/user_data.json`, `data/auth_data.json`, and `data/access_requests.json`. The current scoring code requires all three records.
+Verify that the user has an application client role and matching records in `data/user_data.json`, `data/auth_data.json`, and `data/access_requests.jsonl`. The current scoring code requires all three records.
 
 ## Main Source Files
 
@@ -240,6 +256,8 @@ Verify that the user has an application client role and matching records in `dat
 | `cyberdome/networking.py` | Peer-to-peer nodes: a `Networking` base class plus `AccessProxyNode`, `TrustEngineNode`, `PolicyEngineNode` and `WebUINode` |
 | `cyberdome/policy.py` | The policies P1 to P6 (see `policies.md`) |
 | `cyberdome/config.py` | Reads `policyConfiguration.yml` |
+| `cyberdome/audit.py` | The audit log (see `audit-log.md`) |
+| `cyberdome/jsonl.py` | Files with one JSON object per line: append with a lock, read from the end |
 | `scripts/` | Launchers: `runAll.sh` for the three engines, `runWebUI.sh` for the Web UI, and one script per engine |
 | `tests/` | Manual check scripts: `test.py` prints one user's trust score, `testAP.py` runs a stand-alone Access Proxy |
 | `compose.yml` | Local identity and database stack |
