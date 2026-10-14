@@ -1,30 +1,57 @@
-# Zero Trust Network Implementation
+# CyberDome: a Zero Trust Access-Control Prototype
 
-CyberDome is a local zero-trust access-control prototype. It combines OIDC authentication, LDAP-backed identities, contextual trust scoring, role-based policy thresholds, a peer-to-peer decision pipeline, and a Flask Web UI.
+CyberDome is a local Zero Trust access-control prototype. Every request for a protected resource follows the Zero Trust workflow:
 
-See [How CyberDome Works](docs/how-it-works.md) for the architecture, authentication and access-decision flows, trust calculation, persisted state, and current prototype limitations.
+```text
+User -> Authentication -> Access Proxy -> Trust Evaluation -> Policy Evaluation -> Allow/Deny -> Resource -> Logging
+```
 
-See the [Changelog](docs/changelog.md) for a dated record of implementation and setup changes.
+- **Authentication:** users log in through Keycloak (OIDC), with identities and groups in OpenLDAP. Every page checks that the login token is still active.
+- **Access Proxy:** every protected page sends its request through the Access Proxy, also when it's opened directly by URL. The page only runs after an "allow".
+- **Trust Engine:** scores each request between 0 and 1 from 7 weighted factors: login history, device, access frequency, location, identity strength, time of access and account age.
+- **Policy Engine:** six named policies (P1 to P6) decide, using the user's role and the request context. Every decision says which policy decided and why.
+- **Audit log:** every decision is logged with the categories `ALLOW`, `DENY`, `AUTHENTICATION_FAILURE` and `POLICY_VIOLATION`, and shown on the `/logging` page.
 
-## Project Overview
+CyberDome started as an existing project. We extended it for the Zero Trust Access-Control assignment. The [changelog](docs/changelog.md) records every change, what was wrong before, and why we changed it.
 
-The implementation will rely on the following components:
+```mermaid
+flowchart LR
+    user(["User"]) --> web["Web UI<br/>login check"]
+    web <--> kc["Keycloak<br/>+ OpenLDAP"]
+    web --> ap["Access Proxy"] --> te["Trust Engine<br/>trust score"] --> pe["Policy Engine<br/>P1 to P6"]
+    pe -- "allow or deny" --> web
+    pe --> log[("Audit log")]
+    web -- "page or 403" --> user
+```
 
-- **Trust Engine**: A trust engine will be implemented to calculate the trust scores of different subjects accessing various resources. It will assess user behavior, device health, and other factors to determine trust levels.
+More pictures, step by step, are in [docs/diagrams.md](docs/diagrams.md).
 
-- **Policy Engine**: A policy engine component will enforce access control policies based on trust scores and other parameters. It ensures that users and devices can only access resources for which they have the necessary permissions.
+## Documentation
 
-- **Access Proxy**: An access proxy will act as an intermediary between users/devices and resources. It will enforce policies, authenticate users, and log access attempts.
+| Document | What's in it |
+| --- | --- |
+| [Diagrams](docs/diagrams.md) | Architecture, login, a protected request, policies, trust score, audit log, code map, data files. Start here |
+| [How CyberDome works](docs/how-it-works.md) | The components, the flows, the request record, the state files, limitations and troubleshooting |
+| [Trust model](docs/trust-model.md) | The 7 trust factors, their weights and why, the factors we removed, the bugs we fixed |
+| [Policies](docs/policies.md) | The policies P1 to P6, the settings, why they look like this, and which policy decides each scenario |
+| [Audit log](docs/audit-log.md) | What gets logged, what an entry looks like, the task's data model, and why the log is append-only |
+| [Changelog](docs/changelog.md) | Every change, newest first, with what we saw and what we changed |
 
-## Technologies Used
+## Demo users and roles
 
-The project will utilize various technologies, including:
+The users come from OpenLDAP. Their LDAP group becomes a Keycloak client role of the `ZeroTrustPlatform` client. The local passwords are the same as the usernames.
 
-- Trust Engine: Python, Machine Learning Algorithms, Markov chains
-- Policy Engine: Python
-- Access Proxy: Nginx, OAuth, Flask framework
+| User | Role | May open |
+| --- | --- | --- |
+| `alice` | Approver | PAM approval |
+| `bob` | Researcher | Resource 1 (transaction data) |
+| `charlie` | Administrator | Resource 1, Resource 2 (access tokens), view the policy page, the audit log |
+| `foo` | Policy Administrator | The policy page, and save policy changes |
+| `demo` | Approver | PAM approval |
 
-## Getting Started
+Which role may open which resource, and how much trust each resource needs, is set in [`policyConfiguration.yml`](policyConfiguration.yml). The policy page (Policy Administrator) can change the minimum trust scores, the trust weights, the risk lists and the night window.
+
+## Getting started
 
 ### Local setup
 
@@ -61,12 +88,13 @@ The local development endpoints and credentials are:
 | Keycloak | `http://localhost:8080/auth` | `admin` / `admin` |
 | phpLDAPadmin | `http://localhost:8081` | `cn=admin,dc=leonet,dc=cns` / `admin_pass` |
 | LDAP | `ldap://localhost:389` | `cn=admin,dc=leonet,dc=cns` / `admin_pass` |
-| Web UI demo user | Keycloak login | `demo` / `demo` |
-| LDAP test user | Keycloak login | `alice` / `alice` |
+| Web UI users | Keycloak login | see [Demo users and roles](#demo-users-and-roles) |
 
-These credentials are for local development only. The imported `myrealm` realm contains the `ZeroTrustPlatform` client expected by the application. The `demo` user has the `Approver` client role. LDAP is configured as a Keycloak user federation provider; assign an application client role to LDAP users in Keycloak before using them in the Web UI.
+These credentials are for local development only. The imported `myrealm` realm contains the `ZeroTrustPlatform` client expected by the application.
 
-Start the Trust Engine, Policy Engine, and Access Proxy together:
+### Run CyberDome
+
+Start the Access Proxy, Trust Engine and Policy Engine together:
 
 ```bash
 ./scripts/runAll.sh
@@ -79,7 +107,7 @@ source venv/bin/activate
 ./scripts/runWebUI.sh
 ```
 
-The scripts in `scripts/` work from any folder. Open `http://localhost:5000`. Stop the Python services with `Ctrl+C` (the engines can take 10 to 20 seconds to stop), then stop the identity stack with:
+The scripts in `scripts/` work from any folder. Open `http://localhost:5000` and log in as one of the demo users. Stop the Python services with `Ctrl+C` (the engines can take 10 to 20 seconds to stop), then stop the identity stack with:
 
 ```bash
 docker compose down
@@ -87,12 +115,51 @@ docker compose down
 
 To delete all local identity data and recreate the seeded environment on the next start, use `docker compose down -v`.
 
-## Contribution Guidelines
+## Tests
 
-Contributions are welcome! Please follow these guidelines when contributing to the project:
+The unit tests need nothing running:
 
-- Fork the repository and create a new branch for your feature/bugfix.
-- Ensure your code follows the project's coding standards.
-- Submit a pull request, clearly describing the changes you made.
+```bash
+python3 tests/test_trust.py      # the 7 trust factors, the weights and the bug fixes
+python3 tests/test_policies.py   # the policies P1 to P6 and the five scenarios of the task
+python3 tests/test_audit.py      # the audit log and the append-only files
+```
+
+They also run with `pytest` (`pytest tests/test_trust.py tests/test_policies.py tests/test_audit.py`).
+
+The end-to-end check needs the identity stack and the engines running (the Web UI itself doesn't need to run):
+
+```bash
+python3 tests/check_access_control.py
+```
+
+It logs in as the demo users, opens every protected page as each of them, and checks the decisions, the request record, the audit log and the time per request. Running it several times within 5 minutes lowers the users' trust scores (many requests in a short time count as a burst), which the checks allow for.
+
+## Project structure
+
+| Folder | What's in it |
+| --- | --- |
+| `web/` | The Flask Web UI: pages (`routes/`), access checks (`authz.py`), the request record (`request_context.py`), the connection to the engines (`proxy_client.py`), privileged access (PAM) |
+| `cyberdome/` | Code shared by the Web UI and the engines: networking and the node classes, the trust model, the policies, the audit log, settings and file paths |
+| `engines/` | Start the Access Proxy, Trust Engine and Policy Engine |
+| `scripts/` | Start scripts |
+| `tests/` | Unit tests and the end-to-end check |
+| `infra/` | Keycloak realm and OpenLDAP seed data |
+| `docs/` | The documentation and diagrams |
+| `data/` | Runtime data, created while the app runs (git-ignored): access requests, the audit log, login history, known devices |
+| `policyConfiguration.yml` | The resource table, minimum trust scores, trust weights, risk lists and night window |
+
+The [code map](docs/diagrams.md#7-code-map) shows which file uses which.
+
+## Limitations
+
+This is a prototype for a local lab. The main limits are listed in [How CyberDome works](docs/how-it-works.md#prototype-limitations) and at the end of the trust model, policies and audit log documents. For example, the engines talk over unencrypted local connections, the device ID is a cookie, and the audit log is a local file.
+
+## Contribution guidelines
+
+- Create a new branch for your change, starting from the newest branch.
+- Run the unit tests (and the end-to-end check if you changed the flow) before you commit.
+- Add an entry to `docs/changelog.md`: what you saw, what you changed and why.
+- Submit a pull request that clearly describes the change.
 
 ## License

@@ -4,6 +4,15 @@ This file records the changes we make to CyberDome, newest first. For each fix w
 
 ## 2026-10-14
 
+### Added: diagrams, and a README that describes CyberDome as it is now
+
+**What we saw:** The only picture of the system was a text diagram in `docs/how-it-works.md`. The README still described the original plans ("will be implemented", Nginx, machine learning, Markov chains), listed only two of the demo users, and didn't mention the tests.
+
+**What we changed:**
+
+- New `docs/diagrams.md` with 8 diagrams in Mermaid (GitHub and VS Code draw them from the text): architecture, logging in, a protected request (sequence), the policies P1 to P6 (flowchart), the trust score, the audit log, a code map, and a table of the data files. We checked that every diagram renders with the Mermaid command-line tool.
+- `README.md` is rewritten: what CyberDome does now (the Zero Trust workflow and the five parts), a small diagram, a guide to the documents, the demo users and their roles, setup and start steps (kept from before), how to run the tests, the project structure, limitations, and contribution steps.
+
 ### Added: one audit log for every access decision (assignment section 3.5)
 
 Branch: `feat-audit-logging`. The log and the reasons behind it are in `docs/audit-log.md`.
