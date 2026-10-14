@@ -275,9 +275,8 @@ class PolicyEngineNode(Networking):
             print(f"Checking against security policies...")
             print(f"Access Request being decided: {access_request}")
 
-            # Retrieving country from location in the access request
-            country = access_request.get('location', '').split('/')[-1]
-            print(f"Country: {country}")
+            # The location is the country code of the user's IP (LOCAL on localhost)
+            print(f"Location: {access_request.get('location')}")
 
             verdict, reason = self.decide(message)
 

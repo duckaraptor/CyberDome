@@ -1,7 +1,7 @@
 '''
 
-Checks the Web UI's access control: the role table (section 3.1) and Access Proxy
-mediation (section 3.2).
+Checks the Web UI's access control: the role table (section 3.1), Access Proxy
+mediation and the request record (section 3.2).
 
 It logs in as real users through Keycloak (alice, bob, charlie, foo), opens every
 protected page as each one with Flask's test client, and checks the answer:
@@ -13,7 +13,9 @@ protected page as each one with Flask's test client, and checks the answer:
     not logged in                  -> redirect to the Keycloak login
     fake or revoked token          -> 401 Invalid or expired token
 
-It also checks that several requests at the same time each get their own verdict,
+It also checks the request record: a new browser gets a device ID cookie, the record
+holds that device ID and the user's own location, and the device counts as new until
+access was allowed from it once. And it checks that several requests at the same time each get their own verdict,
 and measures how long a mediated request takes.
 
 Needs:
@@ -46,7 +48,7 @@ logging.disable(logging.CRITICAL)
 
 import app as web_app  # noqa: E402  (needs the paths above)
 from cyberdome.access_rules import is_role_allowed  # noqa: E402
-from cyberdome.data_paths import ACCESS_DECISIONS_FILE  # noqa: E402
+from cyberdome.data_paths import ACCESS_DECISIONS_FILE, ACCESS_REQUESTS_FILE  # noqa: E402
 from cyberdome.settings import KEYCLOAK_CLIENT_ID, KEYCLOAK_CLIENT_SECRET  # noqa: E402
 from keycloak_config import REVOCATION_URL, TOKEN_URL  # noqa: E402
 from proxy_client import stop_node  # noqa: E402
@@ -119,6 +121,19 @@ def saved_decision(request_id):
         return next((d for d in json.load(file) if str(d.get('request_id')) == str(request_id)), None)
 
 
+def saved_request(request_id):
+    with open(ACCESS_REQUESTS_FILE) as file:
+        return next((r for r in json.load(file) if str(r.get('ID')) == str(request_id)), None)
+
+
+def device_cookie(response):
+    # The device ID cookie the server set in this response, as (value, the whole Set-Cookie header), or (None, '')
+    for header in response.headers.getlist('Set-Cookie'):
+        if header.startswith('cyberdome_device_id='):
+            return header.split(';')[0].split('=', 1)[1], header
+    return None, ''
+
+
 def engines_running():
     down = []
     for name, port in ENGINE_PORTS.items():
@@ -170,6 +185,30 @@ def main():
           f"saved decision: {decision}")
     check("the saved decision is for this resource and action",
           bool(decision and decision.get('resource') == 'resource_1' and decision.get('action') == 'read'), f"saved decision: {decision}")
+
+    print("\n== Request record: device ID cookie, the user's own location, new and known devices")
+    browser = client_for(tokens['bob'], 'bob')  # a new browser, without a device ID yet
+    device_id, cookie_header = device_cookie(browser.get('/home'))
+    check("a new browser gets a device ID cookie", device_id is not None)
+    check("the cookie is HttpOnly and SameSite=Lax", 'HttpOnly' in cookie_header and 'SameSite=Lax' in cookie_header, cookie_header)
+
+    response = call(browser, 'GET', '/resource-1')
+    first = saved_request(response.headers.get('X-CyberDome-Request-Id')) or {}
+    check("the record holds the browser's device ID", first.get('device_id') == device_id, f"record: {first}")
+    check("the first request from this device has new_device = true", first.get('new_device') is True, f"record: {first}")
+    check("the record has the user's location (LOCAL on localhost)", first.get('location') == 'LOCAL', f"location: {first.get('location')}")
+    check("the record has no server values (public IP, MAC, vendor)",
+          not {'public_ip_address', 'device_mac', 'device_vendor'} & set(first), f"fields: {sorted(first)}")
+    check("the browser keeps its device ID (no new cookie)", device_cookie(response)[0] is None)
+
+    response = call(browser, 'GET', '/resource-1')
+    second = saved_request(response.headers.get('X-CyberDome-Request-Id')) or {}
+    check("after an allowed request the device is known: new_device = false", second.get('new_device') is False, f"record: {second}")
+
+    browser.set_cookie('cyberdome_device_id', 'not-a-device-id')
+    response = call(browser, 'GET', '/resource-1')
+    replaced, _ = device_cookie(response)
+    check("an invalid device ID cookie is replaced with a new ID", replaced not in (None, 'not-a-device-id'), f"new cookie: {replaced}")
 
     print("\n== Login-only pages: a logged-in user gets through")
     for path in LOGIN_ONLY:

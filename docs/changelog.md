@@ -4,6 +4,26 @@ This file records the changes we make to CyberDome, newest first. For each fix w
 
 ## 2026-10-14
 
+### Added: a real request record with device ID and the user's location (assignment section 3.2)
+
+**What we saw:** The request record still had the **Flask server's** public IP, location and MAC address (`uuid.getnode()`), so every user got the same values, wherever they were. A website can't see a visitor's MAC address anyway, because MAC addresses don't cross routers. The record had no device ID. The location was stored as `City/CC` (`Nairobi/KE`), but the risk lists in `policyConfiguration.yml` hold country codes (`KE`), so they never matched.
+
+**What we changed:**
+
+- `web/request_context.py`:
+  - Every browser gets a random device ID in a `cyberdome_device_id` cookie on its first visit (`HttpOnly`, `SameSite=Lax`, one year). An invalid cookie is replaced with a new ID. The record has it as `device_id`.
+  - The record has `new_device`: `true` until access was allowed once from this device for this user. Known devices are kept in `data/known_devices.json` (git-ignored, like the rest of `data/`).
+  - `location` is now the country code of the user's own `source_ip`, looked up on ipinfo.io (once per IP). Localhost and private addresses give `LOCAL`, and a failed lookup gives `Unknown`.
+  - `public_ip_address`, `device_mac` and `device_vendor` are removed.
+- `web/app.py` runs the device ID cookie functions on every request. `web/authz.py` remembers the device after an "allow" decision.
+- `web/keycloak_functions.py`: removed `get_mac_details`, `get_public_ip` and `get_location`, which only looked up the server's own values.
+- `web/templates/logging_and_monitoring.html` shows source IP, device ID and new device instead of the server's public IP, MAC and vendor.
+- `cyberdome/networking.py`: the Policy Engine prints the location as it is, without splitting `City/CC`.
+- `tests/check_access_control.py` has a new section for the request record: the cookie is set and safe, the record holds the browser's device ID and `LOCAL`, the server fields are gone, the device goes from new to known after an allowed request, and an invalid cookie is replaced.
+- Docs: a new "Request Record" section in `docs/how-it-works.md`, with the reasons for each field.
+
+**Not done yet:** the Trust Engine doesn't use `new_device` yet, and `LOCAL` gets the default location score. Both are part of step 6 (section 3.3).
+
 ### Added: every protected request goes through the Access Proxy (assignment section 3.2)
 
 **What we saw:** The engines' verdict only told the browser's JavaScript where to go next. The resource pages never asked for a verdict, so opening `/resource-1` directly skipped the Access Proxy, Trust Engine and Policy Engine, and the admin pages never went through the engines at all. The engines only got a user ID, and looked up "the user's latest request" in `data/access_requests.json`, which could pick the wrong request when several came in close together. Each request also started and stopped its own node 4 on port 8004, so two requests at once clashed.

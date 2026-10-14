@@ -58,7 +58,7 @@ User -> Authentication -> Access Proxy -> Trust Engine -> Policy Engine -> Allow
 1. The user opens a protected page, for example `/resource-1`.
 2. `@protected_resource` (`web/authz.py`) checks the login and asks Keycloak whether the token is still active. Otherwise: login redirect or `401`.
 3. The role table in `policyConfiguration.yml` is checked as a first gate. Otherwise: `403`. (This moves into the Policy Engine with the policies of section 3.4.)
-4. The Web UI builds the request record on the server (`web/request_context.py`): user, roles, resource, action (`read` for GET, `write` for POST), time, authentication status, source IP, and device type, OS and browser from the `User-Agent` header. It appends the record to `data/access_requests.json` with a new `ID`.
+4. The Web UI builds the request record on the server (`web/request_context.py`, see Request Record below): user, roles, resource, action, time, authentication status, source IP and its location, device ID, and device type, OS and browser. It appends the record to `data/access_requests.json` with a new `ID`.
 5. The Web UI's node 4 (`web/proxy_client.py`, one node shared by all requests on port `8004`) sends the record to the Access Proxy on port `8001`.
 6. The Access Proxy checks the record is complete (ID, user, resource, action, authentication status), stamps it as mediated, and forwards the whole record to the Trust Engine on port `8002`. An incomplete record is rejected with a reason.
 7. The Trust Engine scores this request and sends the record and score to the Policy Engine on port `8003`. If scoring fails, it sends the error instead.
@@ -68,6 +68,29 @@ User -> Authentication -> Access Proxy -> Trust Engine -> Policy Engine -> Allow
 The response carries `X-CyberDome-Request-Id`, `X-CyberDome-Decision` and `X-CyberDome-Decided-By` headers, so each page can be traced to its decision.
 
 The access request's `ID` travels through the engines as `request_id`, so each verdict can be matched to its request. Each node is its own class in `cyberdome/networking.py` and only handles the messages it expects. Messages are Python dictionaries wrapped with a sender ID and exchanged by `p2pnetwork` over localhost TCP connections.
+
+## Request Record
+
+The Web UI builds the record in `web/request_context.py`. Every value comes from something the server controls: the checked token, the page, the HTTP connection and the browser's headers. Values in a request body are never used, because the user can change them.
+
+| Field | Source |
+| --- | --- |
+| `user_id`, `username`, `roles`, `authentication_status` | The token, checked with Keycloak |
+| `resource`, `path`, `action` | The page and the HTTP method (`read` for GET, `write` for POST) |
+| `access_request_time` | The server clock |
+| `source_ip` | The HTTP connection |
+| `location` | A lookup of `source_ip`, as a country code. `LOCAL` for localhost and private addresses, `Unknown` if the lookup fails |
+| `device_id` | A random ID in the `cyberdome_device_id` cookie (`HttpOnly`, one year), set on the first visit |
+| `new_device` | `true` until access was allowed once from this device for this user. Known devices are kept in `data/known_devices.json` |
+| `browser`, `device_type`, `device_OS` | The `User-Agent` header |
+
+Why these fields:
+
+- The trust score should use facts about the user's own request. The original record used the Flask server's public IP, location and MAC address, so every user got the same values. These fields are removed.
+- A website can't see a visitor's MAC address, because MAC addresses don't cross routers. The device ID cookie takes its place.
+- The country code has the same format as the risk lists in `policyConfiguration.yml` (for example `KE`), so location rules can match.
+- On localhost the location is always `LOCAL`. Tests for an unusual location fake it inside the test code, not in the app, so a user can't choose their own location.
+- A cookie is a weak device identity: the user can delete or copy it. A real deployment would use device certificates or a device management (MDM) check.
 
 ## Trust Calculation
 
@@ -203,7 +226,7 @@ This command destroys all local identity data.
 
 - Local peer traffic is unauthenticated and unencrypted.
 - JSON files are shared mutable state without locking or transactions.
-- Location, public IP and MAC in the request record are still the Flask server's own values, not the user's (assignment section 3.2, step 3).
+- The device ID is a cookie, so a user can delete or copy it. On localhost the location is always `LOCAL`.
 - Trust scoring expects complete identity, authentication, and request records plus a numeric account timestamp.
 - Pages now check roles against the resource table, but the Policy Engine's own role thresholds still don't deny users with an unknown role.
 - The Web UI's secrets come from `.env`, but the identity stack's local passwords are still in `compose.yml` and `infra/` (Postgres, LDAP admin, Keycloak admin, and the seeded users). The `ZeroTrustPlatform` client secret is also in `infra/keycloak/myrealm-realm.json`, and `KEYCLOAK_CLIENT_SECRET` must match it.

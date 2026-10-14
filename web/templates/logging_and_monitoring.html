@@ -49,11 +49,11 @@
                 <th>User ID</th>
                 <th>Resource Requested</th>
                 <th>Access Request Time</th>
-                <th>Public IP</th>
+                <th>Source IP</th>
                 <th>Location</th>
                 <th>Device Type</th>
-                <th>Device MAC</th>
-                <th>Device Vendor</th>
+                <th>Device ID</th>
+                <th>New Device</th>
                 <th>Device OS</th>
             </tr>
         </thead>
@@ -64,11 +64,11 @@
                 <td>{{ request['user_id'] }}</td>
                 <td>{{ request['resource_requested'] }}</td>
                 <td>{{ request['access_request_time'] }}</td>
-                <td>{{ request['public_ip_address'] }}</td>
+                <td>{{ request['source_ip'] }}</td>
                 <td>{{ request['location'] }}</td>
                 <td>{{ request['device_type'] }}</td>
-                <td>{{ request['device_mac'] }}</td>
-                <td>{{ request['device_vendor'] }}</td>
+                <td>{{ request['device_id'] }}</td>
+                <td>{{ request['new_device'] }}</td>
                 <td>{{ request['device_OS'] }}</td>
             </tr>
             {% endfor %}

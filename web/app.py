@@ -20,6 +20,7 @@ from keycloak_config import (AUTHORIZATION_URL, INTROSPECTION_URL, ISSUER_URL, K
                              TOKEN_URL, USERINFO_URL)
 import models  # registers the PAM database tables with db
 from proxy_client import stop_node
+from request_context import load_device_id, save_device_cookie
 from routes import access, auth, monitoring, policy_config, privileged_access, resources
 
 logging.basicConfig(level=logging.DEBUG)
@@ -65,6 +66,10 @@ oidc.init_app(app)
 # Configuration for SQLAlchemy
 app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{PAM_DB_FILE}'
 db.init_app(app)
+
+# Every browser gets a device ID cookie on its first visit (see request_context.py)
+app.before_request(load_device_id)
+app.after_request(save_device_cookie)
 
 # The pages, one blueprint per area
 for blueprint_module in (auth, access, resources, policy_config, monitoring, privileged_access):

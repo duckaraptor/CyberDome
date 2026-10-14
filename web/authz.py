@@ -21,7 +21,7 @@ from cyberdome.access_rules import allowed_roles, get_resource, is_role_allowed
 from extensions import keycloak_openid, oidc
 from keycloak_config import KEYCLOAK_CLIENT_ID
 from proxy_client import request_access_decision
-from request_context import build_access_request
+from request_context import build_access_request, remember_device
 
 
 def access_denied(status, title, reason, resource=None):
@@ -96,7 +96,8 @@ def protected_resource(resource):
     def decorator(view):
         @functools.wraps(view)
         def mediate(*args, **kwargs):
-            decision = request_access_decision(build_access_request(resource))
+            access_request = build_access_request(resource)
+            decision = request_access_decision(access_request)
 
             if decision is None:
                 return access_denied(504, 'No access decision', 'The decision engines did not answer in time, so access is denied.', resource)
@@ -107,6 +108,7 @@ def protected_resource(resource):
                 title = 'Access denied' if status == 403 else 'Cannot check your request'
                 response = make_response(access_denied(status, title, decision.get('reason') or 'Denied by the policy.', resource))
             else:
+                remember_device(access_request['username'], access_request['device_id'])
                 response = make_response(view(*args, **kwargs))
 
             # Show which decision this page was served under (useful as evidence and for tests)

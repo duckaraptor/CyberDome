@@ -20,6 +20,7 @@ AUTH_DATA_FILE = os.path.join(DATA_DIR, 'auth_data.json')
 EVENTS_FILE = os.path.join(DATA_DIR, 'events.json')
 USER_DATA_FILE = os.path.join(DATA_DIR, 'user_data.json')
 PAM_DB_FILE = os.path.join(DATA_DIR, 'privileged_access.db')
+KNOWN_DEVICES_FILE = os.path.join(DATA_DIR, 'known_devices.json')
 
 # Configuration, edited by hand or from the policy page
 POLICY_CONFIG_FILE = os.path.join(REPO_ROOT, 'policyConfiguration.yml')
