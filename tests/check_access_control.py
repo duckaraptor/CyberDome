@@ -1,28 +1,40 @@
 '''
 
-Checks the Web UI's access control against the role table in policyConfiguration.yml.
+Checks the Web UI's access control: the role table (section 3.1) and Access Proxy
+mediation (section 3.2).
 
 It logs in as real users through Keycloak (alice, bob, charlie, foo), opens every
 protected page as each one with Flask's test client, and checks the answer:
 
-    allowed role         -> the page runs (no 401, 403 or login redirect)
-    other roles          -> 403 Forbidden
-    not logged in        -> redirect to the Keycloak login
-    fake or revoked token -> 401 Invalid or expired token
+    role not in the table          -> 403, and the request never reaches the engines
+    role in the table              -> the request goes through Access Proxy -> Trust Engine
+                                      -> Policy Engine. The page runs only if the Policy Engine
+                                      allows it, otherwise 403 with the Policy Engine's reason.
+    not logged in                  -> redirect to the Keycloak login
+    fake or revoked token          -> 401 Invalid or expired token
 
-Needs: the identity stack running (docker compose up), and the Web UI's settings
-(.env or environment variables, see .env.example). The local demo users' passwords
-are the same as their usernames.
+It also checks that several requests at the same time each get their own verdict,
+and measures how long a mediated request takes.
+
+Needs:
+  - the identity stack running (docker compose up)
+  - the decision engines running (./scripts/runAll.sh)
+  - the Web UI's settings (.env or environment variables, see .env.example)
+The local demo users' passwords are the same as their usernames.
 
 Run from anywhere:  python3 tests/check_access_control.py
 
-Note: it posts an empty update to /receivePolicyConfigurations, which rewrites
-policyConfiguration.yml with the same content.
+Note: it adds access requests and decisions to data/, and posts an empty update to
+/receivePolicyConfigurations, which rewrites policyConfiguration.yml with the same content.
 
 '''
+import json
 import logging
 import os
+import socket
+import statistics
 import sys
+import threading
 import time
 
 import requests
@@ -34,8 +46,10 @@ logging.disable(logging.CRITICAL)
 
 import app as web_app  # noqa: E402  (needs the paths above)
 from cyberdome.access_rules import is_role_allowed  # noqa: E402
+from cyberdome.data_paths import ACCESS_DECISIONS_FILE  # noqa: E402
 from cyberdome.settings import KEYCLOAK_CLIENT_ID, KEYCLOAK_CLIENT_SECRET  # noqa: E402
 from keycloak_config import REVOCATION_URL, TOKEN_URL  # noqa: E402
+from proxy_client import stop_node  # noqa: E402
 
 USERS = {  # username: role (from infra/openldap/bootstrap.ldif)
     'alice': 'Approver',
@@ -55,10 +69,10 @@ ROLE_PROTECTED = [
     ('pam_approval', 'POST', '/approve_request'),
 ]
 
-# Pages that only need a login. /resource-selection and /receive-access-request are only
-# checked without a login here, because when logged in they call external services and the engines.
-LOGIN_ONLY = ['/privilegedAccess', '/approval_status', '/enterSecretKey', '/protected_page', '/success', '/viewAccessRequests']
-LOGIN_ONLY_NOT_CALLED = [('GET', '/resource-selection'), ('POST', '/receive-access-request')]
+# Pages that only need a login
+LOGIN_ONLY = ['/resource-selection', '/privilegedAccess', '/approval_status', '/enterSecretKey', '/protected_page', '/success', '/viewAccessRequests']
+
+ENGINE_PORTS = {'Access Proxy': 8001, 'Trust Engine': 8002, 'Policy Engine': 8003}
 
 results = []
 
@@ -95,34 +109,76 @@ def is_login_redirect(response):
     return response.status_code == 302 and '/login' in response.headers.get('Location', '')
 
 
+def mediated(response):
+    # The Policy Engine decided this request (set by protected_resource in web/authz.py)
+    return response.headers.get('X-CyberDome-Decided-By') == 'Policy Engine'
+
+
+def saved_decision(request_id):
+    with open(ACCESS_DECISIONS_FILE) as file:
+        return next((d for d in json.load(file) if str(d.get('request_id')) == str(request_id)), None)
+
+
+def engines_running():
+    down = []
+    for name, port in ENGINE_PORTS.items():
+        with socket.socket() as sock:
+            if sock.connect_ex(('127.0.0.1', port)) != 0:
+                down.append(f"{name} (port {port})")
+    return down
+
+
 def main():
+    down = engines_running()
+    if down:
+        print(f"The decision engines must be running (./scripts/runAll.sh). Not reachable: {', '.join(down)}")
+        return 2
+
     web_app.app.config.update(TESTING=False, PROPAGATE_EXCEPTIONS=False)
     with web_app.app.app_context():
         web_app.db.create_all()
 
-    print("== Role table: every user on every role-protected page")
+    tokens = {username: get_token(username) for username in USERS}
+    clients = {}
+    for username in USERS:
+        clients[username] = client_for(tokens[username], username)
+        # /home saves the user's identity and login events to data/, which the engines read
+        clients[username].get('/home')
+
+    print("== Role table and Access Proxy mediation: every user on every role-protected page")
     for username, role in USERS.items():
-        client = client_for(get_token(username), username)
         for resource, method, path in ROLE_PROTECTED:
-            response = call(client, method, path)
+            response = call(clients[username], method, path)
+            label = f"{username:8} ({role}) {method:4} {path:30}"
             if is_role_allowed([role], resource):
-                ok = response.status_code not in (401, 403) and not is_login_redirect(response)
-                expected = 'allowed'
+                decision = response.headers.get('X-CyberDome-Decision')
+                ok = mediated(response) and ((decision == 'ALLOW' and response.status_code not in (401, 403)) or
+                                             (decision == 'DENY' and response.status_code == 403))
+                check(f"{label} expect mediated -> {decision}", ok,
+                      f"got {response.status_code}, decided by {response.headers.get('X-CyberDome-Decided-By')}")
             else:
-                ok = response.status_code == 403
-                expected = '403'
-            check(f"{username:8} ({role}) {method:4} {path:30} expect {expected}", ok, f"got {response.status_code}")
+                check(f"{label} expect 403, not sent to the engines", response.status_code == 403 and not mediated(response),
+                      f"got {response.status_code}")
+
+    print("\n== Direct URL: the request goes through the engines, and the decision is saved with a reason")
+    response = call(clients['bob'], 'GET', '/resource-1')
+    request_id = response.headers.get('X-CyberDome-Request-Id')
+    decision = saved_decision(request_id)
+    check(f"bob GET /resource-1 directly is mediated (request {request_id})", mediated(response))
+    check("the decision is in data/access_decision.json with a trust score and a reason",
+          bool(decision and decision.get('reason') and decision.get('user_trust_score') is not None),
+          f"saved decision: {decision}")
+    check("the saved decision is for this resource and action",
+          bool(decision and decision.get('resource') == 'resource_1' and decision.get('action') == 'read'), f"saved decision: {decision}")
 
     print("\n== Login-only pages: a logged-in user gets through")
-    client = client_for(get_token('bob'), 'bob')
     for path in LOGIN_ONLY:
-        response = call(client, 'GET', path)
+        response = call(clients['bob'], 'GET', path)
         check(f"bob GET {path:30} expect allowed", response.status_code not in (401, 403) and not is_login_redirect(response), f"got {response.status_code}")
 
     print("\n== Not logged in: every protected page sends you to the login")
     anonymous = web_app.app.test_client()
-    pages = [(m, p) for _, m, p in ROLE_PROTECTED] + [('GET', p) for p in LOGIN_ONLY] + LOGIN_ONLY_NOT_CALLED
-    for method, path in pages:
+    for method, path in [(m, p) for _, m, p in ROLE_PROTECTED] + [('GET', p) for p in LOGIN_ONLY]:
         response = call(anonymous, method, path)
         check(f"anonymous {method:4} {path:30} expect login redirect", is_login_redirect(response), f"got {response.status_code}")
 
@@ -137,13 +193,41 @@ def main():
     response = call(client_for(token, 'charlie'), 'GET', '/resource-2')
     check(f"revoked token   GET /resource-2 expect 401 (logout returned {revoked.status_code})", response.status_code == 401, f"got {response.status_code}")
 
+    print("\n== Several requests at the same time each get their own verdict")
+    answers = []
+
+    def one_request():
+        client = client_for(tokens['bob'], 'bob')
+        answers.append(call(client, 'GET', '/resource-1'))
+
+    threads = [threading.Thread(target=one_request) for _ in range(5)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    ids = [a.headers.get('X-CyberDome-Request-Id') for a in answers]
+    check("5 requests at once: all mediated, all allowed", all(mediated(a) and a.status_code == 200 for a in answers),
+          f"statuses {[a.status_code for a in answers]}")
+    check("5 requests at once: 5 different request IDs, each with its own saved decision",
+          len(set(ids)) == 5 and all(saved_decision(i) for i in ids), f"ids {ids}")
+
+    print("\n== Timing: bob GET /resource-1, 10 requests one after another")
+    times = []
+    for _ in range(10):
+        start = time.perf_counter()
+        call(clients['bob'], 'GET', '/resource-1')
+        times.append((time.perf_counter() - start) * 1000)
+    print(f"      median {statistics.median(times):.0f} ms, min {min(times):.0f} ms, max {max(times):.0f} ms per request "
+          f"(token check + Access Proxy + Trust Engine + Policy Engine)")
+
     print("\n== Task scenarios, checked directly")
-    bob = client_for(get_token('bob'), 'bob')
-    charlie = client_for(get_token('charlie'), 'charlie')
-    check("Scenario 1: bob (Researcher) opens Resource 1 -> 200", call(bob, 'GET', '/resource-1').status_code == 200)
-    check("Scenario 2: bob (Researcher) opens Resource 2 -> 403", call(bob, 'GET', '/resource-2').status_code == 403)
-    check("Scenario 5: charlie (Administrator) opens the policy configuration page -> allowed",
-          call(charlie, 'GET', '/configurePolicies').status_code not in (401, 403))
+    response = call(clients['bob'], 'GET', '/resource-1')
+    check("Scenario 1: bob (Researcher) opens Resource 1 -> 200, ALLOW by the Policy Engine",
+          response.status_code == 200 and response.headers.get('X-CyberDome-Decision') == 'ALLOW')
+    check("Scenario 2: bob (Researcher) opens Resource 2 -> 403", call(clients['bob'], 'GET', '/resource-2').status_code == 403)
+    response = call(clients['charlie'], 'GET', '/configurePolicies')
+    check("Scenario 5: charlie (Administrator) opens the policy configuration page -> mediated, ALLOW",
+          mediated(response) and response.headers.get('X-CyberDome-Decision') == 'ALLOW' and response.status_code not in (401, 403))
 
     passed = sum(results)
     print(f"\n{passed}/{len(results)} checks passed")
@@ -151,4 +235,9 @@ def main():
 
 
 if __name__ == '__main__':
-    sys.exit(main())
+    try:
+        exit_code = main()
+    finally:
+        # Stop the Web UI's node 4, so the script exits by itself
+        stop_node()
+    sys.exit(exit_code)

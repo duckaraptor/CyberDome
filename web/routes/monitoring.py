@@ -8,14 +8,14 @@ import os
 
 from flask import Blueprint, render_template
 
-from authz import require_role
+from authz import protected_resource
 from cyberdome.data_paths import ACCESS_REQUESTS_FILE
 
 bp = Blueprint('monitoring', __name__)
 
 
 @bp.route('/logging')
-@require_role('logging')
+@protected_resource('logging')
 def access_requests():
     file_path = ACCESS_REQUESTS_FILE
     access_requests_data = []

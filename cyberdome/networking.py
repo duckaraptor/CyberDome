@@ -15,6 +15,7 @@ can match each verdict to its request.
 import json
 import os
 import threading
+from datetime import datetime
 import traceback
 from p2pnetwork.node import Node
 from . import trust_algorithm as ta
@@ -143,31 +144,50 @@ class Networking(Node):
         print(f"\nStopping the {self.get_node_role(self.id)} node")
 
 
+# What the Access Proxy needs in every access request before it passes it on
+REQUIRED_REQUEST_FIELDS = ('ID', 'user_id', 'resource', 'action', 'authentication_status')
+
+
 class AccessProxyNode(Networking):
-    '''Node 1: receives access requests from the Web UI and asks the Trust Engine for a score.'''
+    '''Node 1: receives access requests from the Web UI, checks they are complete, and passes them to the Trust Engine.'''
     NODE_ID = ACCESS_PROXY_ID
 
     def process_message_from_web_ui(self, sender, message):
         print(f"Received an Access Request from Web UI [{sender}]: {message}")
         # Check if the 'intent' key has the value 'Access Request'
-        if message.get('intent', '').lower() == 'access request':
-            #access request received, prepare data to send to Trust Engine(node 2)
-            user_id = message.get('user_id')
-            intent = 'request_trust_score'
-
-            data = {
-                'user_id': user_id,
-                # Carried through to the verdict so the Web UI can match it to this request
-                'request_id': message.get('ID'),
-                'intent': intent
-            }
-            self.send_message_to_node(TRUST_ENGINE_ID,data)
-        else:
+        if message.get('intent', '').lower() != 'access request':
             print("The intent is not 'Access Request'")
+            return
+
+        missing = [field for field in REQUIRED_REQUEST_FIELDS if not message.get(field)]
+        if missing:
+            # Reject incomplete requests here, and tell the Web UI why
+            reason = f"Request rejected by the Access Proxy: missing {', '.join(missing)}"
+            print(reason)
+            self.send_message_to_node(WEB_UI_ID, {
+                'request_id': message.get('ID'),
+                'access_decision': 0,
+                'decided_by': 'Access Proxy',
+                'reason': reason
+            })
+            return
+
+        # The whole request travels on, so the next engines decide on this request
+        access_request = dict(message, mediated_by='Access Proxy', proxy_received_at=datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+        print(f"Access Proxy: request {access_request['ID']} from {access_request['user_id']} for {access_request['resource']} ({access_request['action']}) is complete, sending it to the Trust Engine")
+
+        data = {
+            'user_id': access_request['user_id'],
+            # Carried through to the verdict so the Web UI can match it to this request
+            'request_id': access_request['ID'],
+            'intent': 'request_trust_score',
+            'access_request': access_request
+        }
+        self.send_message_to_node(TRUST_ENGINE_ID,data)
 
 
 class TrustEngineNode(Networking):
-    '''Node 2: calculates the user's trust score and sends it to the Policy Engine.'''
+    '''Node 2: calculates the trust score for the request and sends it to the Policy Engine.'''
     NODE_ID = TRUST_ENGINE_ID
 
     def process_message_from_access_proxy(self, sender, message):
@@ -175,24 +195,72 @@ class TrustEngineNode(Networking):
         # check if the intent is 'request_trust_score'
         if message.get('intent') == 'request_trust_score':
             user_id = message.get('user_id')
+            access_request = message.get('access_request')
             print(f"Received a Trust Score Request From: {user_id}")
-            #get the trust score for this user_id using the trust algorithm
-            user_trust_score = ta.calculate_overall_trust_score(user_id)
             print(f"Performing Trust Evaluation for the Subject({user_id})...")
-            print(f"Subject({user_id}) Trust Score: {user_trust_score}")
+
+            # If scoring fails (for example, no login data for the user yet), the Policy Engine
+            # still gets an answer, and denies with this reason, instead of the request timing out
+            trust_error = None
+            try:
+                user_trust_score = ta.calculate_overall_trust_score(user_id, access_request)
+                print(f"Subject({user_id}) Trust Score: {user_trust_score}")
+            except Exception as e:
+                traceback.print_exc()
+                user_trust_score = None
+                trust_error = f"Trust evaluation failed: {type(e).__name__}: {e}"
+                print(trust_error)
+
             print(f"Sending the subject's trust score to Policy Engine for policy validation...")
             data = {
                 'user_id': user_id,
                 'request_id': message.get('request_id'),
                 'intent': 'request_access_decision',
-                'user_trust_score': user_trust_score
+                'access_request': access_request,
+                'user_trust_score': user_trust_score,
+                'trust_error': trust_error
             }
             self.send_message_to_node(POLICY_ENGINE_ID,data)
 
 
 class PolicyEngineNode(Networking):
-    '''Node 3: applies the policies, saves the decision and sends the verdict to the Web UI.'''
+    '''Node 3: applies the policies to the request, saves the decision and sends it, with a reason, to the Web UI.'''
     NODE_ID = POLICY_ENGINE_ID
+
+    def decide(self, message):
+        # Returns (verdict, reason). Fails closed: anything missing means deny.
+        user_id = message.get('user_id')
+        user_trust_score = message.get('user_trust_score')
+
+        if message.get('trust_error') or user_trust_score is None:
+            return 0, message.get('trust_error') or 'No trust score for this request'
+
+        user_identity_data = get_user_identity_data_by_id(user_id,USER_DATA_FILE)
+        user_auth_data = get_latest_auth_data(user_id, AUTH_DATA_FILE)
+
+        print(f"Latest Authentication Data for the user: {user_auth_data}")
+        print(f"User Identity Data: {user_identity_data}")
+
+        if not user_identity_data:
+            return 0, 'No identity record for this user'
+        if not user_auth_data:
+            return 0, 'No login history for this user'
+
+        # Retrieving user_role from user_identity_data
+        user_role = user_identity_data.get('user_role')
+        print(f"User Role: {user_role}")
+
+        # Retrieving sign_in_risk from user_auth_data
+        sign_in_risk = user_auth_data.get('sign_in_risk')
+        print(f"Sign In Risk: {sign_in_risk}")
+
+        # Call the access decision script /function here to return the verdict
+        verdict = make_access_decision(user_role,user_trust_score,sign_in_risk)
+        if verdict:
+            reason = f"Allowed: trust score {user_trust_score:.2f} and sign-in value {sign_in_risk:.2f} meet the policy thresholds for role {user_role}"
+        else:
+            reason = f"Denied: trust score {user_trust_score:.2f} or sign-in value {sign_in_risk:.2f} is below the policy threshold for role {user_role}"
+        return verdict, reason
 
     def process_message_from_trust_engine(self, sender, message):
         print(f"Received a message from Trust Engine Node [{sender}]: {message}")
@@ -200,33 +268,20 @@ class PolicyEngineNode(Networking):
         if message.get('intent') == 'request_access_decision':
             user_id = message.get('user_id')
             user_trust_score = message.get('user_trust_score')
+            # The request being decided, as sent by the Access Proxy
+            access_request = message.get('access_request') or get_latest_access_request(user_id, ACCESS_REQUESTS_FILE) or {}
             print(f"Received a Request for Access Decision from Trust Engine for User {user_id}")
             print(f"Current Subject's Trust Score: {user_trust_score}")
             print(f"Checking against security policies...")
+            print(f"Access Request being decided: {access_request}")
 
-            user_identity_data = get_user_identity_data_by_id(user_id,USER_DATA_FILE)
-            user_auth_data = get_latest_auth_data(user_id, AUTH_DATA_FILE)
-            user_access_request = get_latest_access_request(user_id, ACCESS_REQUESTS_FILE)
-
-            print(f"Latest Access Request for the user: {user_access_request}")
-            print(f"Latest Authentication Data for the user: {user_auth_data}")
-            print(f"User Identity Data: {user_identity_data}")
-
-            # Retrieving user_role from user_identity_data
-            user_role = user_identity_data.get('user_role')
-
-            print(f"User Role: {user_role}")
-
-            # Retrieving sign_in_risk from user_auth_data
-            sign_in_risk = user_auth_data.get('sign_in_risk')
-            print(f"Sign In Risk: {sign_in_risk}")
-
-            # Retrieving country from location in user_access_request
-            location = user_access_request.get('location', '')
-
-            country = location.split('/')[-1]
-
+            # Retrieving country from location in the access request
+            country = access_request.get('location', '').split('/')[-1]
             print(f"Country: {country}")
+
+            verdict, reason = self.decide(message)
+
+            print(f"Policy Engine Verdict: {verdict} ({reason})")
 
             file_path = ACCESS_DECISIONS_FILE
 
@@ -243,18 +298,19 @@ class PolicyEngineNode(Networking):
                 access_decisions = []
                 new_id = 1
 
-            # Call the access decision script /function here to return the verdict
-            verdict = make_access_decision(user_role,user_trust_score,sign_in_risk)
-
-            print(f"Policy Engine Verdict: {verdict}")
-             # Prepare the access decision data
+            # Prepare the access decision data
             access_decision_data = {
                 'ID': new_id,
                 'request_id': message.get('request_id'),
                 'user_id': user_id,
+                'resource': access_request.get('resource'),
+                'action': access_request.get('action'),
                 'intent': 'request_access_decision',
                 'user_trust_score': user_trust_score,
-                'access_decision': verdict
+                'access_decision': verdict,
+                'reason': reason,
+                'decided_by': 'Policy Engine',
+                'decided_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             }
 
             self.send_message_to_node(WEB_UI_ID,access_decision_data)
@@ -268,7 +324,7 @@ class PolicyEngineNode(Networking):
 
 
 class WebUINode(Networking):
-    '''Node 4: started by the Web UI for one access request. Waits for the Policy Engine's verdict.'''
+    '''Node 4: the Web UI's node. Sends access requests to the Access Proxy and waits for each request's verdict.'''
     NODE_ID = WEB_UI_ID
 
     def __init__(self, host, port, callback=None, max_connections=0):

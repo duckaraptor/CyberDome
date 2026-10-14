@@ -165,10 +165,11 @@ def calculate_access_request_score(access_request_data, night_start=night_start_
     return access_request_score
 
 # Function to calculate Overall Trust Score
-def calculate_overall_trust_score(user_id):
-    # Get user data using provided functions
+def calculate_overall_trust_score(user_id, access_request=None):
+    # Get user data using provided functions. The access request being decided is passed in
+    # when known, so the score uses this request and not just the user's latest one in the file.
     identity_data = get_user_identity_data_by_id(user_id,USER_DATA_FILE)
-    access_request_data = get_latest_access_request(user_id, ACCESS_REQUESTS_FILE)
+    access_request_data = access_request or get_latest_access_request(user_id, ACCESS_REQUESTS_FILE)
     authentication_data = get_latest_auth_data(user_id, AUTH_DATA_FILE)
 
     # Calculate scores for each segment

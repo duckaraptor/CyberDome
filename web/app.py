@@ -19,6 +19,7 @@ from extensions import db, oidc
 from keycloak_config import (AUTHORIZATION_URL, INTROSPECTION_URL, ISSUER_URL, KEYCLOAK_CLIENT_ID, KEYCLOAK_REALM,
                              TOKEN_URL, USERINFO_URL)
 import models  # registers the PAM database tables with db
+from proxy_client import stop_node
 from routes import access, auth, monitoring, policy_config, privileged_access, resources
 
 logging.basicConfig(level=logging.DEBUG)
@@ -72,4 +73,8 @@ for blueprint_module in (auth, access, resources, policy_config, monitoring, pri
 if __name__ == "__main__":
     with app.app_context():
         db.create_all()
-    app.run(debug=True)
+    try:
+        app.run(debug=True)
+    finally:
+        # Stop the connection to the decision engines, so Ctrl+C exits cleanly
+        stop_node()

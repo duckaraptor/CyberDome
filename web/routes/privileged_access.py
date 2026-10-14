@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 
 from flask import Blueprint, jsonify, redirect, render_template, request, session, url_for
 
-from authz import require_authentication, require_role
+from authz import protected_resource, require_authentication
 from extensions import db, keycloak_admin
 from keycloak_config import KEYCLOAK_CLIENT_ID
 from keycloak_functions import get_client_role_members_emails, get_user_id_by_email
@@ -105,7 +105,7 @@ def privilegedAccess():
 
 
 @bp.route('/testing')
-@require_role('pam_approval')
+@protected_resource('pam_approval')
 def testApproval():
     #extract the approver's details (require_role has already checked that the user is an Approver)
     auth_profile = session.get('oidc_auth_profile', {})
@@ -119,7 +119,7 @@ def testApproval():
     return render_template('approver_page.html', access_requests=access_requests, username=username, email=email, user_id=user_id, user_role=user_role)
 
 @bp.route('/approve_request', methods=['POST'])
-@require_role('pam_approval')
+@protected_resource('pam_approval')
 def approve_request():
     if request.method == 'POST':
         data = request.json

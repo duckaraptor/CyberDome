@@ -49,15 +49,23 @@ The application recognizes the Keycloak client roles `Approver`, `Security Viewe
 
 ## Access-Decision Flow
 
-1. The user selects a protected resource in the Web UI.
-2. The browser supplies context including location, public IP, device type, operating system, browser, and MAC address.
-3. Flask appends the request to `data/access_requests.json` and temporarily starts Web UI peer node 4 on port `8004`.
-4. Node 4 sends the request to the Access Proxy on port `8001`.
-5. The Access Proxy asks the Trust Engine on port `8002` to evaluate the user.
-6. The Trust Engine loads the user's latest identity, authentication, and request records.
-7. The Trust Engine sends its score to the Policy Engine on port `8003`.
-8. The Policy Engine applies `policyConfiguration.yml`, writes `data/access_decision.json`, and sends the verdict to node 4.
-9. Node 4 waits up to 10 seconds for the verdict carrying this request's ID, and Flask returns it to the browser. If none arrives, Flask denies access (`504`, verdict `0`).
+Every request for a protected resource (both resources, policy configuration, logging and PAM approval) goes through the decision engines before the page runs. Opening a page directly by URL takes the same path.
+
+```
+User -> Authentication -> Access Proxy -> Trust Engine -> Policy Engine -> Allow/Deny -> Resource
+```
+
+1. The user opens a protected page, for example `/resource-1`.
+2. `@protected_resource` (`web/authz.py`) checks the login and asks Keycloak whether the token is still active. Otherwise: login redirect or `401`.
+3. The role table in `policyConfiguration.yml` is checked as a first gate. Otherwise: `403`. (This moves into the Policy Engine with the policies of section 3.4.)
+4. The Web UI builds the request record on the server (`web/request_context.py`): user, roles, resource, action (`read` for GET, `write` for POST), time, authentication status, source IP, and device type, OS and browser from the `User-Agent` header. It appends the record to `data/access_requests.json` with a new `ID`.
+5. The Web UI's node 4 (`web/proxy_client.py`, one node shared by all requests on port `8004`) sends the record to the Access Proxy on port `8001`.
+6. The Access Proxy checks the record is complete (ID, user, resource, action, authentication status), stamps it as mediated, and forwards the whole record to the Trust Engine on port `8002`. An incomplete record is rejected with a reason.
+7. The Trust Engine scores this request and sends the record and score to the Policy Engine on port `8003`. If scoring fails, it sends the error instead.
+8. The Policy Engine decides, writes the decision (with resource, action, trust score and reason) to `data/access_decision.json`, and sends it to node 4.
+9. The page runs only if the decision is allow. Otherwise the user sees `403` with the reason. No verdict within 10 seconds gives `504`, and an unreachable Access Proxy gives `503`. Both deny access.
+
+The response carries `X-CyberDome-Request-Id`, `X-CyberDome-Decision` and `X-CyberDome-Decided-By` headers, so each page can be traced to its decision.
 
 The access request's `ID` travels through the engines as `request_id`, so each verdict can be matched to its request. Each node is its own class in `cyberdome/networking.py` and only handles the messages it expects. Messages are Python dictionaries wrapped with a sender ID and exchanged by `p2pnetwork` over localhost TCP connections.
 
@@ -163,7 +171,7 @@ Most JSON and SQLite state files below are created or updated at runtime after t
 | `8001` | Access Proxy, peer node 1 |
 | `8002` | Trust Engine, peer node 2 |
 | `8003` | Policy Engine, peer node 3 |
-| `8004` | Temporary Web UI peer node 4 |
+| `8004` | Web UI peer node 4, started on the first protected request |
 | `8080` | Keycloak under the `/auth` path |
 | `8081` | phpLDAPadmin |
 
@@ -195,7 +203,7 @@ This command destroys all local identity data.
 
 - Local peer traffic is unauthenticated and unencrypted.
 - JSON files are shared mutable state without locking or transactions.
-- Each request starts node 4 on port `8004`, so two simultaneous access requests clash on that port.
+- Location, public IP and MAC in the request record are still the Flask server's own values, not the user's (assignment section 3.2, step 3).
 - Trust scoring expects complete identity, authentication, and request records plus a numeric account timestamp.
 - Pages now check roles against the resource table, but the Policy Engine's own role thresholds still don't deny users with an unknown role.
 - The Web UI's secrets come from `.env`, but the identity stack's local passwords are still in `compose.yml` and `infra/` (Postgres, LDAP admin, Keycloak admin, and the seeded users). The `ZeroTrustPlatform` client secret is also in `infra/keycloak/myrealm-realm.json`, and `KEYCLOAK_CLIENT_SECRET` must match it.

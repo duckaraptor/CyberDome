@@ -4,6 +4,23 @@ This file records the changes we make to CyberDome, newest first. For each fix w
 
 ## 2026-10-14
 
+### Added: every protected request goes through the Access Proxy (assignment section 3.2)
+
+**What we saw:** The engines' verdict only told the browser's JavaScript where to go next. The resource pages never asked for a verdict, so opening `/resource-1` directly skipped the Access Proxy, Trust Engine and Policy Engine, and the admin pages never went through the engines at all. The engines only got a user ID, and looked up "the user's latest request" in `data/access_requests.json`, which could pick the wrong request when several came in close together. Each request also started and stopped its own node 4 on port 8004, so two requests at once clashed.
+
+**What we changed:**
+
+- `web/authz.py` has a new `@protected_resource(resource)` check, used on every page in the role table (both resources, policy configuration, logging, PAM approval). It runs the login, token and role checks, then sends the request through Access Proxy, Trust Engine and Policy Engine, and only runs the page if the Policy Engine allows it. A deny gives `403` with the Policy Engine's reason. No verdict in 10 seconds gives `504`, and an unreachable Access Proxy gives `503`. Responses carry `X-CyberDome-Request-Id`, `X-CyberDome-Decision` and `X-CyberDome-Decided-By` headers.
+- `web/request_context.py` builds the request record on the server: user, roles, resource, action (`read` or `write`), time, authentication status, source IP, and device type, OS and browser from the `User-Agent` header. Location, public IP and MAC are still the server's own values, now looked up once per process instead of on every request.
+- `web/proxy_client.py` keeps one Web UI node (node 4) for all requests, started on the first request and reconnected when needed. Request IDs are given out under a lock. `stop_node` stops it cleanly, so Ctrl+C on the Web UI exits.
+- `cyberdome/networking.py`:
+  - The Access Proxy checks the record is complete (ID, user, resource, action, authentication status), stamps it as mediated, and forwards the whole record. Incomplete records are rejected with a reason.
+  - The Trust Engine scores this request. If scoring fails, it passes the error on instead of crashing.
+  - The Policy Engine decides on this request, and saves and returns the decision with resource, action, trust score, reason and time.
+- `cyberdome/trust_algorithm.py`: `calculate_overall_trust_score` can take the request record directly.
+- The resource selection page links straight to the resources. `POST /receive-access-request` and the browser-side context collection are removed.
+- `tests/check_access_control.py` now needs the engines running. It checks that table-allowed requests are mediated and decided by the Policy Engine, that a direct URL is mediated and its decision saved with a reason, that 5 requests at once each get their own verdict, and it measures the time per request. All 59 checks passed. A mediated request took about 18 ms (median, 10 requests).
+
 ### Added: role-based access control on every page (assignment section 3.1)
 
 **What we saw:** Roles were only used to grey out options in the browser (`home.html`), and only for three old roles, so Researcher and Administrator saw everything. Most pages had no login check at all. `/testing` and `/viewAccessRequests` had their login check in the wrong order, so it never ran. `/receivePolicyConfigurations`, which saves policy changes, could be called by anyone. `/hidden_resource` let anyone test guesses for the PAM secret, and printed the real secret to the console.

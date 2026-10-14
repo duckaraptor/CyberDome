@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 import yaml
 from flask import Blueprint, render_template, request
 
-from authz import require_role
+from authz import protected_resource
 from cyberdome.data_paths import POLICY_CONFIG_FILE
 from models import AccessRequest
 
@@ -33,7 +33,7 @@ def update_policy_configurations(data):
         yaml.dump(existing_data, file)
 
 @bp.route('/receivePolicyConfigurations', methods=['POST'])
-@require_role('policy_configuration')
+@protected_resource('policy_configuration')
 def receive_policy_configurations():
     if request.method == 'POST':
         data = request.json  # Get JSON data from the POST request
@@ -50,7 +50,7 @@ def receive_policy_configurations():
 
 
 @bp.route('/configurePolicies', methods=['POST','GET'])
-@require_role('policy_configuration')
+@protected_resource('policy_configuration')
 def configure_policies():
     # Retrieve the access duration from the database for the latest approved request ID
 
