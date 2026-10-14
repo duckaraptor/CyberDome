@@ -12,6 +12,10 @@
             color: #4CAF50;
             margin-top: 15px;
         }
+        .hint {
+            color: #777;
+            font-size: 14px;
+        }
     </style>
 </head>
 <body>
@@ -19,40 +23,41 @@
     <div class="container">
         <h1>Policy Configuration Page</h1>
         <h2>Configure ZTA System Security Policies</h2>
-        <!-- Countdown display -->
+        <!-- Countdown display, only when the access comes from an approved PAM request -->
+        {% if expiration_time %}
         <div id="remainingTime">Time Left: <span id="countdown"></span></div>
+        {% endif %}
 
-        <!-- Trust Algorithm Weights Assignment Section -->
+        <!-- Trust Score Weights Section (see docs/trust-model.md) -->
         <div class="section">
-            <div class="section-title">Trust Algorithm Weights Assignment</div>
+            <div class="section-title">Trust Score Weights</div>
+            <div class="hint">The Trust Engine divides by the sum of the weights, so they don't have to add up to exactly 1.</div>
             <div class="section-content">
-                <div class="segment-name">User Identity Score Weight</div>
-                <input id="userIdentityWeight" type="number" step="0.1" min="0" max="1" value="0.5">
+                {% for factor, label in factor_labels.items() %}
+                <div class="segment-name">{{ label }}</div>
+                <input id="weight-{{ factor }}" class="trust-weight" data-factor="{{ factor }}" type="number" step="0.05" min="0" max="1" value="{{ weights[factor] }}">
+                {% endfor %}
 
-                <div class="segment-name">Authentication Score Weight</div>
-                <input id="authScoreWeight" type="number" step="0.1" min="0" max="1" value="0.5">
-
-                <div class="segment-name">Contextual Score Weight</div>
-                <input id="contextScoreWeight" type="number" step="0.1" min="0" max="1" value="0.5">
-
-                <div class="segment-name">Experience Score Weight</div>
-                <input id="expScoreWeight" type="number" step="0.1" min="0" max="1" value="0.5">
+                <div class="segment-name">Access Frequency Window (minutes)</div>
+                <input id="accessFrequencyWindowMinutes" type="number" step="1" min="1" value="{{ config.get('accessFrequencyWindowMinutes', 5) }}">
+                <div class="segment-name">Access Frequency Maximum (requests in the window)</div>
+                <input id="accessFrequencyMaxRequests" type="number" step="1" min="1" value="{{ config.get('accessFrequencyMaxRequests', 30) }}">
             </div>
         </div>
-        <!-- End of Trust Algorithm Weights Assignment Section -->
+        <!-- End of Trust Score Weights Section -->
 
         <!-- Trust Score Threshold for User Roles Section -->
         <div class="section">
             <div class="section-title">Trust Score Threshold for User Roles</div>
             <div class="section-content">
                 <div class="segment-name">Approver</div>
-                <input id="approverThreshold" type="number" step="0.1" min="0" max="1" value="0.7">
+                <input id="approverThreshold" type="number" step="0.1" min="0" max="1" value="{{ config.get('approverThreshold', 0.9) }}">
 
                 <div class="segment-name">Policy Administrator</div>
-                <input id="adminThreshold" type="number" step="0.1" min="0" max="1" value="0.6">
+                <input id="adminThreshold" type="number" step="0.1" min="0" max="1" value="{{ config.get('adminThreshold', 0.6) }}">
 
                 <div class="segment-name">Security Viewer</div>
-                <input id="securityViewerThreshold" type="number" step="0.1" min="0" max="1" value="0.4">
+                <input id="securityViewerThreshold" type="number" step="0.1" min="0" max="1" value="{{ config.get('securityViewerThreshold', 0.4) }}">
             </div>
         </div>
         <!-- End of Trust Score Threshold for User Roles Section -->
@@ -62,37 +67,31 @@
 
             <!-- Geolocation Risk -->
             <div class="segment-name">Geolocation Risk</div>
+            <div class="hint">Two-letter country codes, for example SE. LOCAL (localhost) always counts as low risk.</div>
             <div class="section-content">
-                <!-- High Risk Locations -->
-                <div class="segment-name">High Risk Locations</div>
-                <div class="section-content" id="highRiskLocations">
-                    <input id="highRiskInput" class="risk-location" type="text" placeholder="Country Code">
-                    <button onclick="addLocation('highRiskLocations')">Add High Risk Location</button>
+                {% for list_id, label in [('highRiskLocations', 'High Risk Locations'), ('mediumRiskLocations', 'Medium Risk Locations'), ('lowRiskLocations', 'Low Risk Locations')] %}
+                <div class="segment-name">{{ label }}</div>
+                <div class="section-content" id="{{ list_id }}">
+                    {% for code in config.get(list_id) or [] %}
+                    <input class="risk-location" type="text" placeholder="Country Code" value="{{ code }}">
+                    {% else %}
+                    <input class="risk-location" type="text" placeholder="Country Code">
+                    {% endfor %}
+                    <button onclick="addLocation('{{ list_id }}')">Add {{ label[:-1] }}</button>
                 </div>
+                {% endfor %}
 
-                <!-- Medium Risk Locations -->
-                <div class="segment-name">Medium Risk Locations</div>
-                <div class="section-content" id="mediumRiskLocations">
-                    <input id="mediumRiskInput" class="risk-location" type="text" placeholder="Country Code">
-                    <button onclick="addLocation('mediumRiskLocations')">Add Medium Risk Location</button>
-                </div>
+                <!-- Sign-in Success Threshold -->
+                <div class="segment-name">Sign-in Success Threshold</div>
+                <div class="hint">Deny when fewer than this share of the user's last 10 logins succeeded.</div>
+                <input id="signInSuccessThreshold" type="number" step="0.1" min="0" max="1" value="{{ config.get('signInSuccessThreshold', 0.5) }}">
 
-                <!-- Low Risk Locations -->
-                <div class="segment-name">Low Risk Locations</div>
-                <div class="section-content" id="lowRiskLocations">
-                    <input id="lowRiskInput" class="risk-location" type="text" placeholder="Country Code">
-                    <button onclick="addLocation('lowRiskLocations')">Add Low Risk Location</button>
-                </div>
-
-                <!-- Sign-in-Risk Threshold -->
-                <div class="segment-name">Sign-in-Risk Threshold</div>
-                <input id="signInRiskThreshold" type="number" step="0.1" min="0" max="1" value="0.5">
-
-                <!-- Suspicious Access Request Time Boundary -->
-                <div class="segment-name">Suspicious Access Request Time Boundary</div>
+                <!-- Night window, used by the time of access factor -->
+                <div class="segment-name">Suspicious Access Request Time Boundary (night window)</div>
+                <div class="hint">Can cross midnight, for example 22:00:00 to 06:00:00.</div>
                 <div class="section-content">
-                    <input id="periodStartInput" type="text" placeholder="Period Start (HH:MM:SS)">
-                    <input id="periodEndInput" type="text" placeholder="Period End (HH:MM:SS)">
+                    <input id="periodStartInput" type="text" placeholder="Period Start (HH:MM:SS)" value="{{ config.get('periodStartInput', '') }}">
+                    <input id="periodEndInput" type="text" placeholder="Period End (HH:MM:SS)" value="{{ config.get('periodEndInput', '') }}">
                 </div>
             </div>
             <button onclick="saveConfigurations()">Save Configurations</button>
@@ -106,103 +105,79 @@
             newInput.className = 'risk-location';
             newInput.type = 'text';
             newInput.placeholder = 'New Country';
-            section.appendChild(newInput);
+            section.insertBefore(newInput, section.querySelector('button'));
         }
+
+        {% if expiration_time %}
+        // Count down to the end of the approved PAM access time. The page no longer reloads
+        // itself, so what you type stays, and the page doesn't send a request every 5 seconds.
+        const expirationTime = new Date('{{ expiration_time }}');
         function updateRemainingTime() {
-                var currentTime = new Date();
-                var expirationTime = localStorage.getItem("expirationTime");
+            const totalSeconds = Math.floor((expirationTime.getTime() - new Date().getTime()) / 1000);
+            const remainingTimeElement = document.getElementById('remainingTime');
 
-                if (!expirationTime) {
-                    expirationTime = new Date('{{ expiration_time }}');
-                    localStorage.setItem("expirationTime", expirationTime); // Store expiration time in local storage
-                } else {
-                    expirationTime = new Date(expirationTime);
-                }
-
-                var timeDiff = expirationTime.getTime() - currentTime.getTime();
-                var totalSeconds = Math.floor(timeDiff / 1000);
-                var remainingTimeElement = document.getElementById('remainingTime');
-
-                if (totalSeconds <= 0) {
-                    remainingTimeElement.textContent = "Time remaining: 0 minutes 0 seconds";
-                    alert("YOUR ACCESS TIME HAS EXPIRED!")
-                    window.location.href = '/revokeToken'
-                    localStorage.removeItem("expirationTime");
-                    clearInterval(refreshInterval); // Stop refreshing the page
-                } else {
-                    var minutes = Math.floor(totalSeconds / 60);
-                    var seconds = totalSeconds % 60;
-                    remainingTimeElement.textContent = "Time remaining: " + minutes + " minutes " + seconds + " seconds";
-                }
-            }
-            var counter =0; 
-            // Call the function to initiate the countdown
-            var refreshInterval = setInterval(function() {
-                updateRemainingTime();
-                counter ++;
-                if (counter ==5)
-                {
-                    counter =0;
-                    location.reload();
-                }
-            }, 1000); // Refresh every secon
-        
-        function saveConfigurations() {
-        const userIdentityWeight = document.getElementById('userIdentityWeight').value;
-        const authScoreWeight = document.getElementById('authScoreWeight').value;
-        const contextScoreWeight = document.getElementById('contextScoreWeight').value;
-        const expScoreWeight = document.getElementById('expScoreWeight').value;
-
-        const approverThreshold = document.getElementById('approverThreshold').value;
-        const adminThreshold = document.getElementById('adminThreshold').value;
-        const securityViewerThreshold = document.getElementById('securityViewerThreshold').value;
-
-        const highRiskLocations = Array.from(document.querySelectorAll('#highRiskLocations input')).map(input => input.value);
-        const mediumRiskLocations = Array.from(document.querySelectorAll('#mediumRiskLocations input')).map(input => input.value);
-        const lowRiskLocations = Array.from(document.querySelectorAll('#lowRiskLocations input')).map(input => input.value);
-
-        const signInRiskThreshold = document.getElementById('signInRiskThreshold').value;
-        const periodStartInput = document.getElementById('periodStartInput').value;
-        const periodEndInput = document.getElementById('periodEndInput').value;
-
-        const payload = {
-            userIdentityWeight,
-            authScoreWeight,
-            contextScoreWeight,
-            expScoreWeight,
-            approverThreshold,
-            adminThreshold,
-            securityViewerThreshold,
-            highRiskLocations,
-            mediumRiskLocations,
-            lowRiskLocations,
-            signInRiskThreshold,
-            periodStartInput,
-            periodEndInput
-        };
-
-        fetch('/receivePolicyConfigurations', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(payload)
-        })
-        .then(response => {
-            if (response.ok) {
-                console.log('Configurations saved successfully!');
-                alert('Policy Configurations have been saved successfully!');
-                window.location.href = '/home'; // Redirect to '/home' route after alert is closed
+            if (totalSeconds <= 0) {
+                remainingTimeElement.textContent = "Time remaining: 0 minutes 0 seconds";
+                clearInterval(countdownInterval);
+                alert("YOUR ACCESS TIME HAS EXPIRED!");
+                window.location.href = '/revokeToken';
             } else {
-                console.error('Failed to save configurations');
-                // Handle failure
+                const minutes = Math.floor(totalSeconds / 60);
+                const seconds = totalSeconds % 60;
+                remainingTimeElement.textContent = "Time remaining: " + minutes + " minutes " + seconds + " seconds";
             }
-        })
-        .catch(error => {
-            console.error('Error:', error);
-            // Handle error
-        });
-    }
+        }
+        updateRemainingTime();
+        const countdownInterval = setInterval(updateRemainingTime, 1000);
+        {% endif %}
+
+        function countryCodes(listId) {
+            return Array.from(document.querySelectorAll('#' + listId + ' input'))
+                .map(input => input.value.trim().toUpperCase())
+                .filter(code => code !== '');
+        }
+
+        function saveConfigurations() {
+            const trustWeights = {};
+            document.querySelectorAll('.trust-weight').forEach(input => {
+                trustWeights[input.dataset.factor] = parseFloat(input.value) || 0;
+            });
+
+            const payload = {
+                trustWeights,
+                accessFrequencyWindowMinutes: parseInt(document.getElementById('accessFrequencyWindowMinutes').value, 10),
+                accessFrequencyMaxRequests: parseInt(document.getElementById('accessFrequencyMaxRequests').value, 10),
+                approverThreshold: document.getElementById('approverThreshold').value,
+                adminThreshold: document.getElementById('adminThreshold').value,
+                securityViewerThreshold: document.getElementById('securityViewerThreshold').value,
+                highRiskLocations: countryCodes('highRiskLocations'),
+                mediumRiskLocations: countryCodes('mediumRiskLocations'),
+                lowRiskLocations: countryCodes('lowRiskLocations'),
+                signInSuccessThreshold: document.getElementById('signInSuccessThreshold').value,
+                periodStartInput: document.getElementById('periodStartInput').value,
+                periodEndInput: document.getElementById('periodEndInput').value
+            };
+
+            fetch('/receivePolicyConfigurations', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            })
+            .then(response => {
+                if (response.ok) {
+                    alert('Policy Configurations have been saved successfully!');
+                    window.location.href = '/home';
+                } else {
+                    alert('Saving failed (' + response.status + ').');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Saving failed: ' + error);
+            });
+        }
     </script>
 </body>
 </html>

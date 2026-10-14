@@ -4,6 +4,35 @@ This file records the changes we make to CyberDome, newest first. For each fix w
 
 ## 2026-10-14
 
+### Changed: a new trust model with 7 factors and configurable weights (assignment section 3.3)
+
+Branch: `feat-trust-engine`. The full model and the reasons are in `docs/trust-model.md`.
+
+**What we saw:** All weights were hard-coded. The policy page saved weight settings, but nothing read them. The score used the user's role (admins got a higher score), the authentication type (the same for everyone), and the OS and device type (Linux and phones scored lower, with no reason given). It had no device status or access frequency, which the task names as examples. We also found these bugs:
+
+- The account-age tiers were in the wrong order, so every account older than about 4.5 days got the top score.
+- The night window couldn't cross midnight.
+- The sign-in value could go up to 1.5, because each user's history started with a made-up 0.
+- `sign_in_risk` measured success, not risk.
+- `KE` was in both the high-risk and medium-risk lists.
+- The config was read once, so changes on the policy page only applied after restarting the engines.
+- The policy page reloaded itself every 5 seconds, which wiped what you typed and sent a request through the engines each time. Its fields always started at fixed values, so saving could reset the settings. Without a PAM request, the page crashed.
+
+**What we changed:**
+
+- `cyberdome/trust_algorithm.py` is rewritten. It scores 7 factors: login history (0.20), device (0.20), access frequency (0.15), location (0.15), identity strength (0.15), time of access (0.10) and account age (0.05). The weights come from `trustWeights` in `policyConfiguration.yml`, and the score is divided by their sum. Each factor returns a score and a reason, and `calculate_trust_breakdown` returns both. The config is read for every request.
+- The removed factors (role, authentication type, OS, device type) are kept as the commented-out function `retired_factor_scores`, with the reason for each.
+- `cyberdome/trust_signals.py`: the sign-in value is a plain success rate over the user's last 10 login attempts, renamed to `sign_in_success_rate`. New helpers: `get_sign_in_success_rate` and `count_recent_access_requests`.
+- `cyberdome/networking.py`: the Trust Engine sends the score and the breakdown (`trust_factors`). The Policy Engine saves the breakdown with each decision in `data/access_decision.json`, and uses the new sign-in success rate.
+- `cyberdome/policy.py` and `policyConfiguration.yml`: `signInRiskThreshold` is renamed to `signInSuccessThreshold`. New settings: `trustWeights`, `accessFrequencyWindowMinutes` (5) and `accessFrequencyMaxRequests` (30). The four old weight settings, which nothing read, are removed. Risk lists: high `KP`, medium `KE`, low `SE`.
+- The policy page shows the 7 weights and the frequency settings, starts every field with the saved value, no longer reloads itself, and works without a PAM request.
+- New `tests/test_trust.py`: 21 tests for every factor, the weights, the bug fixes and the example scores. They don't need Keycloak or the engines. All 21 passed.
+- Docs: new `docs/trust-model.md`, and a shorter Trust Calculation section in `docs/how-it-works.md` that points to it.
+
+**Effect on scores:** a normal user on a known device now scores about 0.90, and about 0.78 on a new device (before: about 0.57 to 0.70 for everyone). The Policy Engine still uses its old role thresholds until section 3.4. With the new scores, foo (Policy Administrator, 0.6) is allowed, and alice (Approver, 0.9) is still denied.
+
+**Old data:** entries in `data/auth_data.json` still have the old `sign_in_risk` key. Nothing reads it any more, because the success rate is calculated from `auth_status`.
+
 ### Added: a real request record with device ID and the user's location (assignment section 3.2)
 
 **What we saw:** The request record still had the **Flask server's** public IP, location and MAC address (`uuid.getnode()`), so every user got the same values, wherever they were. A website can't see a visitor's MAC address anyway, because MAC addresses don't cross routers. The record had no device ID. The location was stored as `City/CC` (`Nairobi/KE`), but the risk lists in `policyConfiguration.yml` hold country codes (`KE`), so they never matched.

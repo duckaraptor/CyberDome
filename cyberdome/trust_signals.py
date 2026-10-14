@@ -9,59 +9,33 @@ HANDLING PROCESSING OF AUTH_DATA
 
 import json
 import os
+from datetime import datetime, timedelta
 
 from .data_paths import AUTH_DATA_FILE, EVENTS_FILE
 
-def calculate_sign_in_risk(auth_data):
-    user_dict = {}
-    sign_in_risk = {}
-    user_chain = {}
+# How many of the user's most recent login attempts count for the sign-in success rate
+LOGIN_HISTORY_SIZE = 10
 
-    # Initialize user_chain for each user_id
-    for entry in auth_data:
-        user_id = entry['user_id']
-        user_chain[user_id] = [0]  # Assuming starting sign-in risk
 
-    # Iterate through auth_data to compute sign-in risk for each user_id
-    for entry in auth_data:
-        user_id = entry['user_id']
-        auth_status = entry['auth_status']
+def success_rate(auth_statuses):
+    # Share of successful logins (auth_status 1) among the given attempts, between 0 and 1.
+    # None if there are no attempts.
+    recent = list(auth_statuses)[-LOGIN_HISTORY_SIZE:]
+    if not recent:
+        return None
+    return sum(1 for status in recent if status == 1) / len(recent)
 
-        if user_id not in user_dict:
-            user_dict[user_id] = {'success_count': 0, 'failure_count': 0}
-        
-        # Update success or failure count for each user
-        if auth_status == 1:
-            user_dict[user_id]['success_count'] += 1
-        else:
-            user_dict[user_id]['failure_count'] += 1
 
-        # Calculate the sign-in risk based on the success and failure counts
-        success_count = user_dict[user_id]['success_count']
-        failure_count = user_dict[user_id]['failure_count']
-        total_count = success_count + failure_count
-
-        if total_count > 0:
-            sign_in_risk[user_id] = success_count / total_count
-
-        # Update Markov Chain for each user
-        user_chain[user_id].append(sign_in_risk[user_id])
-
-    return user_chain
-
-def predict_sign_in_risk(user_chain, current_sign_in_risk):
-    # Predict the next sign-in risk based on the transition probabilities
-    predicted_sign_in_risk = {}
-    
-    for user_id, chain in user_chain.items():
-        if len(chain) > 1:
-            transition_prob = chain[-1] - chain[-2]  # Difference between last two values
-            if user_id in current_sign_in_risk:
-                predicted_sign_in_risk[user_id] = current_sign_in_risk[user_id] + transition_prob
-            else:
-                predicted_sign_in_risk[user_id] = transition_prob  # Assign transition_prob if user_id not found
-
-    return predicted_sign_in_risk
+def add_sign_in_success_rates(auth_data):
+    # Give each login attempt the user's success rate over their last attempts, up to and including this one.
+    # (This replaces the original "Markov chain" prediction, which started each user's history with a
+    # made-up 0 and could give values up to 1.5.)
+    history = {}
+    for entry in sorted(auth_data, key=lambda entry: entry['time'] or 0):
+        statuses = history.setdefault(entry['user_id'], [])
+        statuses.append(entry['auth_status'])
+        entry['sign_in_success_rate'] = success_rate(statuses)
+    return auth_data
 
 def process_events(events_data):
     cleaned_data = []
@@ -83,23 +57,8 @@ def process_events(events_data):
 
             cleaned_data.append(cleaned_event)
 
-    # Update auth_data with calculated sign-in risk
-    auth_data = cleaned_data[:]
-    user_chain = calculate_sign_in_risk(auth_data)
-
-    for entry in auth_data:
-        user_id = entry['user_id']
-        entry['sign_in_risk'] = user_chain[user_id][-1]
-
-    # Predict the next sign-in risk
-    current_sign_in_risk = {entry['user_id']: entry['sign_in_risk'] for entry in auth_data if entry['user_id'] is not None}
-    predicted_sign_in_risk = predict_sign_in_risk(user_chain, current_sign_in_risk)
-
-    # Blend the predicted and current sign-in risk
-    for entry in auth_data:
-        user_id = entry['user_id']
-        if user_id in predicted_sign_in_risk:
-            entry['sign_in_risk'] = (entry['sign_in_risk'] + predicted_sign_in_risk[user_id]) / 2
+    # Each login attempt gets the user's sign-in success rate at that moment
+    auth_data = add_sign_in_success_rates(cleaned_data[:])
 
     # File handling to store events in a JSON file
     file_path = AUTH_DATA_FILE
@@ -249,3 +208,37 @@ def get_user_identity_data_by_id(user_id, user_data_file):
             return user
 
     return None  # Return None if user_id not found
+
+
+def get_sign_in_success_rate(user_id, auth_data_file=AUTH_DATA_FILE):
+    # The user's share of successful logins over their last LOGIN_HISTORY_SIZE attempts, or None without any
+    try:
+        with open(auth_data_file, 'r') as file:
+            data = json.load(file)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+    attempts = sorted((entry for entry in data if entry.get('user_id') == user_id), key=lambda entry: entry.get('time') or 0)
+    return success_rate(entry.get('auth_status') for entry in attempts)
+
+
+def count_recent_access_requests(user_id, request_time, minutes, access_requests_file, exclude_id=None):
+    # How many access requests the user sent in the `minutes` before request_time (a 'YYYY-MM-DD HH:MM:SS' string).
+    # The request being scored (exclude_id) isn't counted.
+    try:
+        with open(access_requests_file, 'r') as file:
+            data = json.load(file)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return 0
+    end = datetime.strptime(request_time, '%Y-%m-%d %H:%M:%S')
+    start = end - timedelta(minutes=minutes)
+    count = 0
+    for request in data:
+        if request.get('user_id') != user_id or (exclude_id is not None and request.get('ID') == exclude_id):
+            continue
+        try:
+            sent = datetime.strptime(request.get('access_request_time', ''), '%Y-%m-%d %H:%M:%S')
+        except ValueError:
+            continue
+        if start <= sent <= end:
+            count += 1
+    return count

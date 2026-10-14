@@ -1,193 +1,246 @@
+'''
+
+The Trust Engine's score: how much we trust one access request, between 0 and 1.
+
+Seven factors are each scored between 0 and 1 and combined with the weights from
+policyConfiguration.yml (trustWeights). Each factor function returns (score, reason),
+so the Policy Engine and the logs can show why a score is low.
+
+The factors, weights and reasons are explained in docs/trust-model.md.
+
+'''
 from datetime import datetime
 
-import yaml
-from .trust_signals import get_latest_access_request, get_latest_auth_data, get_user_identity_data_by_id
-from .data_paths import ACCESS_REQUESTS_FILE, AUTH_DATA_FILE, POLICY_CONFIG_FILE, USER_DATA_FILE
-# Function to calculate User Identity Score
-def calculate_user_identity_score(identity_data):
-    email_verified_score = 0.0
-    totp_enabled_score = 0.0
-    user_role_score = 0.0
-    
-    # Calculate scores based on email_verified, totp_enabled, and user_role
-    if identity_data['email_verified']:
-        email_verified_score = 1.0  # Higher score for verified email
-    if identity_data['totp_enabled']:
-        totp_enabled_score = 1.0  # Higher score for TOTP enabled
+from .data_paths import ACCESS_REQUESTS_FILE, USER_DATA_FILE
+from .policy import load_policy_configuration
+from .trust_signals import (count_recent_access_requests, get_latest_access_request, get_sign_in_success_rate,
+                            get_user_identity_data_by_id)
 
-    if identity_data['user_role'] == 'Policy Administrator':
-        user_role_score = 0.9
-    elif identity_data['user_role'] == 'Approver':
-        user_role_score = 0.7
-    else:
-        user_role_score = 0.5
+# Used when policyConfiguration.yml has no (or no valid) trustWeights
+DEFAULT_WEIGHTS = {
+    'loginHistory': 0.20,
+    'device': 0.20,
+    'accessFrequency': 0.15,
+    'location': 0.15,
+    'identityStrength': 0.15,
+    'accessTime': 0.10,
+    'accountAge': 0.05,
+}
+# Names shown on the policy page
+FACTOR_LABELS = {
+    'loginHistory': 'Login History',
+    'device': 'Device (known or new)',
+    'accessFrequency': 'Access Frequency',
+    'location': 'Location',
+    'identityStrength': 'Identity Strength (verified email, MFA)',
+    'accessTime': 'Time of Access',
+    'accountAge': 'Account Age',
+}
+DEFAULT_FREQUENCY_WINDOW_MINUTES = 5
+DEFAULT_FREQUENCY_MAX_REQUESTS = 30
+DEFAULT_NIGHT_START = '00:00:00'
+DEFAULT_NIGHT_END = '06:00:00'
 
-    # Assign weights to attributes
-    weight_email_verified = 0.4
-    weight_totp_enabled = 0.4
-    weight_user_role = 0.2
+MS_PER_MONTH = 1000 * 60 * 60 * 24 * 30  # a month counted as 30 days
 
-    # Calculate weighted score for user identity
-    user_identity_score = (email_verified_score * weight_email_verified) + \
-                         (totp_enabled_score * weight_totp_enabled) + \
-                         (user_role_score * weight_user_role)
-    return user_identity_score
 
-# Function to calculate Authentication Data Score
-def calculate_authentication_data_score(authentication_data):
-    sign_in_risk = authentication_data['sign_in_risk']
-    auth_type_score = 0.0
-    
-    # Consider sign_in_risk and auth_type
-    if sign_in_risk >= 0.9:
-        sign_in_risk_score = 0.9  # Higher risk increases the score
-    elif sign_in_risk >=0.7 and sign_in_risk < 0.9:
-        sign_in_risk_score = 0.75
-    elif sign_in_risk >=0.5 and sign_in_risk < 0.7:
-        sign_in_risk_score = 0.5
-    else:
-        sign_in_risk_score = 0.3
+# --- Settings from policyConfiguration.yml ---------------------------------------
 
-    # Evaluate auth_type and assign scores
-    if authentication_data['auth_type'] == 'code':
-        auth_type_score = 0.7
-    else:
-        auth_type_score = 0.5
+def trust_weights(config):
+    # The weights from the config. Missing or invalid ones fall back to the default, negative ones count as 0.
+    configured = config.get('trustWeights') or {}
+    weights = {}
+    for factor, default in DEFAULT_WEIGHTS.items():
+        try:
+            weights[factor] = max(float(configured.get(factor, default)), 0.0)
+        except (TypeError, ValueError):
+            weights[factor] = default
+    if sum(weights.values()) <= 0:
+        return dict(DEFAULT_WEIGHTS)
+    return weights
 
-    # Assign weights to attributes
-    weight_sign_in_risk = 0.6
-    weight_auth_type = 0.4
 
-    # Calculate weighted score for authentication data
-    authentication_data_score = (sign_in_risk_score * weight_sign_in_risk) + \
-                                (auth_type_score * weight_auth_type)
-    return authentication_data_score
+def config_number(config, key, default):
+    try:
+        return float(config.get(key, default))
+    except (TypeError, ValueError):
+        return default
 
-# Function to calculate Experience Score
-def calculate_experience_score(created_timestamp):
-    # Get the current timestamp in milliseconds (assuming it's in milliseconds)
-    current_timestamp = datetime.now().timestamp() * 1000
 
-    # Calculate tenure in milliseconds by finding the difference between current time and user's creation time
-    tenure_ms = current_timestamp - created_timestamp
+def config_time(config, key, default):
+    try:
+        return datetime.strptime(str(config.get(key) or default), '%H:%M:%S').time()
+    except ValueError:
+        return datetime.strptime(default, '%H:%M:%S').time()
 
-    # Convert tenure from milliseconds to months
-    tenure_months = tenure_ms / (1000 * 60 * 60 * 24 * 30)  # Assuming 30 days in a month
 
-    # Define thresholds for experience (in months)
-    threshold_1 = 1 
-    threshold_2 = 0.15  
+def country_list(config, key):
+    # A risk list from the config as upper-case country codes, without empty entries
+    return {str(code).strip().upper() for code in (config.get(key) or []) if str(code).strip()}
 
-    # Assign scores based on tenure
-    if tenure_months >= threshold_2:
-        experience_score = 0.8  # Higher experience score
-    elif tenure_months >= threshold_1:
-        experience_score = 0.6  # Moderate experience score
-    else:
-        experience_score = 0.4  # Lower experience score
 
-    return experience_score
+def is_in_night_window(time_of_day, start, end):
+    # The window can cross midnight, for example 22:00 to 06:00
+    if start <= end:
+        return start <= time_of_day <= end
+    return time_of_day >= start or time_of_day <= end
 
-#function to calculate the subject's score based on the access request and contextual information  such as location 
-# File path to policyConfiguration.yml
-file_path = POLICY_CONFIG_FILE
 
-# Load policyConfiguration.yml file
-with open(file_path, 'r') as file:
-    policy_configurations = yaml.safe_load(file)
+# --- The 7 factors: each returns (score between 0 and 1, reason) --------------------
 
-# Extract country lists for each risk category
-high_risk_countries = policy_configurations.get('highRiskLocations', [])
-medium_risk_countries = policy_configurations.get('mediumRiskLocations', [])
-low_risk_countries = policy_configurations.get('lowRiskLocations', [])
+def login_history_score(sign_in_success_rate):
+    if sign_in_success_rate is None:
+        return 0.5, 'no login history'
+    rate = min(max(sign_in_success_rate, 0.0), 1.0)
+    return rate, f'{rate:.0%} of recent logins succeeded'
 
-# Extract night start and night end times and convert to datetime objects
-period_start = policy_configurations.get('periodStartInput', '00:00:00')
-period_end = policy_configurations.get('periodEndInput', '06:00:00')
 
-night_start_time = datetime.strptime(period_start, '%H:%M:%S').time()
-night_end_time = datetime.strptime(period_end, '%H:%M:%S').time()
+def device_score(new_device):
+    # A missing value counts as a new device (fail safe)
+    if new_device is False:
+        return 1.0, 'known device'
+    return 0.4, 'new device'
 
-# Function to assign trust scores based on access request data for the user_id
-def calculate_access_request_score(access_request_data, night_start=night_start_time, night_end=night_end_time,high_risk_locations=high_risk_countries, medium_risk_locations=medium_risk_countries, low_risk_locations=low_risk_countries):
-    location_score = 0.0
-    access_time_score = 0.0
-    device_os_score = 0.0
-    device_type_score = 0.0
-    
-   # Evaluate location, access request time, device_os, and device_type
-    location_risk = access_request_data['location'] 
-    if high_risk_locations and location_risk in high_risk_locations:
-        location_score = 0.15
-    elif medium_risk_locations and location_risk in medium_risk_locations:
-        location_score = 0.4
-    elif low_risk_locations and location_risk in low_risk_locations:
-        location_score = 0.7
-    else:
-        location_score = 0.5  # Assign a default score for locations not specified
 
-    # Assess access request time
-    access_time = datetime.strptime(access_request_data['access_request_time'], '%Y-%m-%d %H:%M:%S')
-    
-    # Check if the access time falls within the specified night time boundaries
-    night_start_time = night_start
-    night_end_time = night_end
-    
-    if night_start_time <= access_time.time() <= night_end_time:
-        access_time_score = 0.6  
-    else:
-        access_time_score = 0.8
+def access_frequency_score(recent_requests, window_minutes, max_requests):
+    if recent_requests <= max_requests:
+        return 1.0, f'{recent_requests} requests in the last {window_minutes:g} minutes'
+    return 0.3, f'{recent_requests} requests in the last {window_minutes:g} minutes (more than {max_requests:g})'
 
-    # Evaluate device_os and device_type
-    device_os = access_request_data['device_OS']
-    if 'Linux' in device_os:
-        device_os_score = 0.5
-    else:
-        device_os_score = 0.8
-    
-    device_type = access_request_data['device_type']
-    if device_type == 'Mobile':
-        device_type_score = 0.5
-    else:
-        device_type_score = 0.8
 
-    # Assign weights to attributes
-    weight_location = 0.3
-    weight_access_time = 0.2
-    weight_device_os = 0.25
-    weight_device_type = 0.25
+def location_score(location, config):
+    location = str(location or 'Unknown').strip().upper()
+    if location in country_list(config, 'highRiskLocations'):
+        return 0.1, f'{location} is a high-risk location'
+    if location in country_list(config, 'mediumRiskLocations'):
+        return 0.5, f'{location} is a medium-risk location'
+    if location == 'LOCAL' or location in country_list(config, 'lowRiskLocations'):
+        return 1.0, f'{location} is a low-risk location'
+    if location == 'UNKNOWN':
+        return 0.5, 'location unknown'
+    return 0.7, f'{location} is not in any risk list'
 
-    # Calculate weighted score for access request
-    access_request_score = (location_score * weight_location) + \
-                           (access_time_score * weight_access_time) + \
-                           (device_os_score * weight_device_os) + \
-                           (device_type_score * weight_device_type)
-    return access_request_score
 
-# Function to calculate Overall Trust Score
+def identity_strength_score(identity_data):
+    email_verified = bool(identity_data.get('email_verified'))
+    mfa_enabled = bool(identity_data.get('totp_enabled'))
+    score = 0.5 * email_verified + 0.5 * mfa_enabled
+    reason = f"email {'verified' if email_verified else 'not verified'}, MFA {'on' if mfa_enabled else 'off'}"
+    return score, reason
+
+
+def access_time_score(access_request_time, config):
+    start = config_time(config, 'periodStartInput', DEFAULT_NIGHT_START)
+    end = config_time(config, 'periodEndInput', DEFAULT_NIGHT_END)
+    time_of_day = datetime.strptime(access_request_time, '%Y-%m-%d %H:%M:%S').time()
+    window = f"{start.strftime('%H:%M')} to {end.strftime('%H:%M')}"
+    if is_in_night_window(time_of_day, start, end):
+        return 0.5, f'inside the night window ({window})'
+    return 1.0, f'outside the night window ({window})'
+
+
+def account_age_score(created_timestamp, now=None):
+    # created_timestamp is Keycloak's, in milliseconds. The oldest tier is checked first.
+    now = now or datetime.now()
+    months = (now.timestamp() * 1000 - created_timestamp) / MS_PER_MONTH
+    if months >= 6:
+        return 1.0, f'account is {months:.0f} months old'
+    if months >= 1:
+        return 0.7, f'account is {months:.0f} months old'
+    return 0.4, f'account is {months * 30:.0f} days old'
+
+
+# --- The score -------------------------------------------------------------------
+
+def calculate_trust(identity_data, access_request, sign_in_success_rate, recent_requests, config):
+    # Scores all 7 factors and combines them. Takes the data directly, so tests can call it without files.
+    # Returns {'score': ..., 'factors': {factor: {'score', 'weight', 'reason'}}}
+    window_minutes = config_number(config, 'accessFrequencyWindowMinutes', DEFAULT_FREQUENCY_WINDOW_MINUTES)
+    max_requests = config_number(config, 'accessFrequencyMaxRequests', DEFAULT_FREQUENCY_MAX_REQUESTS)
+
+    factor_scores = {
+        'loginHistory': login_history_score(sign_in_success_rate),
+        'device': device_score(access_request.get('new_device')),
+        'accessFrequency': access_frequency_score(recent_requests, window_minutes, max_requests),
+        'location': location_score(access_request.get('location'), config),
+        'identityStrength': identity_strength_score(identity_data),
+        'accessTime': access_time_score(access_request['access_request_time'], config),
+        'accountAge': account_age_score(identity_data['created_timestamp']),
+    }
+
+    weights = trust_weights(config)
+    total_weight = sum(weights.values())
+    score = sum(weights[factor] * factor_score for factor, (factor_score, _) in factor_scores.items()) / total_weight
+
+    factors = {
+        factor: {'score': round(factor_score, 3), 'weight': round(weights[factor] / total_weight, 3), 'reason': reason}
+        for factor, (factor_score, reason) in factor_scores.items()
+    }
+    return {'score': round(score, 4), 'factors': factors}
+
+
+def calculate_trust_breakdown(user_id, access_request=None):
+    # Loads the user's data from data/ and scores this access request.
+    # The config is read on every call, so changes on the policy page apply straight away.
+    config = load_policy_configuration()
+    identity_data = get_user_identity_data_by_id(user_id, USER_DATA_FILE)
+    if not identity_data:
+        raise ValueError('No identity record for this user')
+    access_request = access_request or get_latest_access_request(user_id, ACCESS_REQUESTS_FILE)
+    if not access_request:
+        raise ValueError('No access request for this user')
+
+    window_minutes = config_number(config, 'accessFrequencyWindowMinutes', DEFAULT_FREQUENCY_WINDOW_MINUTES)
+    recent_requests = count_recent_access_requests(user_id, access_request['access_request_time'], window_minutes,
+                                                   ACCESS_REQUESTS_FILE, exclude_id=access_request.get('ID'))
+
+    return calculate_trust(identity_data, access_request, get_sign_in_success_rate(user_id), recent_requests, config)
+
+
 def calculate_overall_trust_score(user_id, access_request=None):
-    # Get user data using provided functions. The access request being decided is passed in
-    # when known, so the score uses this request and not just the user's latest one in the file.
-    identity_data = get_user_identity_data_by_id(user_id,USER_DATA_FILE)
-    access_request_data = access_request or get_latest_access_request(user_id, ACCESS_REQUESTS_FILE)
-    authentication_data = get_latest_auth_data(user_id, AUTH_DATA_FILE)
+    # Only the number, for callers that don't need the breakdown (for example tests/test.py)
+    return calculate_trust_breakdown(user_id, access_request)['score']
 
-    # Calculate scores for each segment
-    user_identity_score = calculate_user_identity_score(identity_data)
-    access_request_score = calculate_access_request_score(access_request_data)
-    authentication_data_score = calculate_authentication_data_score(authentication_data)
-    experience_score = calculate_experience_score(identity_data['created_timestamp'])
 
-    # Apply different weights to each segment
-    weight_user_identity = 0.3
-    weight_access_request = 0.2
-    weight_authentication_data = 0.25
-    weight_experience = 0.25
-
-    # Calculate overall trust score based on weighted segments
-    overall_trust_score = (user_identity_score * weight_user_identity) + \
-                          (access_request_score * weight_access_request) + \
-                          (authentication_data_score * weight_authentication_data) + \
-                          (experience_score * weight_experience)
-
-    return overall_trust_score
+# --- Retired factors ---------------------------------------------------------------
+#
+# The original CyberDome also scored these inputs. We removed them from the score
+# (see "Factors we removed" in docs/trust-model.md), and keep the old code here,
+# commented out, in case we want to bring one back.
+#
+# def retired_factor_scores(identity_data, authentication_data, access_request_data):
+#     # Role: a role says what a user may do, not how much we trust this request.
+#     # Higher scores for admins would trust a stolen admin account more.
+#     if identity_data['user_role'] == 'Policy Administrator':
+#         user_role_score = 0.9
+#     elif identity_data['user_role'] == 'Approver':
+#         user_role_score = 0.7
+#     else:
+#         user_role_score = 0.5
+#
+#     # Authentication type: every browser login through Keycloak is 'code', so everyone got 0.7.
+#     if authentication_data['auth_type'] == 'code':
+#         auth_type_score = 0.7
+#     else:
+#         auth_type_score = 0.5
+#
+#     # Operating system: Linux scored lower, with no reason given.
+#     if 'Linux' in access_request_data['device_OS']:
+#         device_os_score = 0.5
+#     else:
+#         device_os_score = 0.8
+#
+#     # Device type: mobile scored lower, with no reason given. Known or new device says more.
+#     if access_request_data['device_type'] == 'Mobile':
+#         device_type_score = 0.5
+#     else:
+#         device_type_score = 0.8
+#
+#     # In the original model these were weighted as: role 0.2 of the identity segment,
+#     # auth type 0.4 of the authentication segment, OS and device type 0.25 each of the context segment.
+#     return {
+#         'role': user_role_score,
+#         'auth_type': auth_type_score,
+#         'device_os': device_os_score,
+#         'device_type': device_type_score,
+#     }

@@ -94,48 +94,19 @@ Why these fields:
 
 ## Trust Calculation
 
-The overall score is a weighted sum of four segments:
+The Trust Engine gives each request a score between 0 and 1, from 7 weighted factors. The weights are in `policyConfiguration.yml` (`trustWeights`) and can be changed on the policy page.
 
-```text
-overall = identity * 0.30
-        + request_context * 0.20
-        + authentication * 0.25
-        + account_experience * 0.25
-```
+| Factor | Weight |
+| --- | --- |
+| Login history (successful logins out of the last 10 attempts) | 0.20 |
+| Device (known or new) | 0.20 |
+| Access frequency (requests in the last 5 minutes) | 0.15 |
+| Location (country risk lists) | 0.15 |
+| Identity strength (verified email, MFA) | 0.15 |
+| Time of access (night window) | 0.10 |
+| Account age | 0.05 |
 
-### Identity
-
-```text
-identity = email_verified * 0.40
-         + totp_enabled * 0.40
-         + role_score * 0.20
-```
-
-Role scores are `0.9` for Policy Administrator, `0.7` for Approver, and `0.5` for other roles.
-
-### Request context
-
-```text
-request_context = location * 0.30
-                + request_time * 0.20
-                + operating_system * 0.25
-                + device_type * 0.25
-```
-
-Location categories and the night-time period come from `policyConfiguration.yml`. Mobile and Linux requests currently receive lower component scores than other device types and operating systems.
-
-### Authentication
-
-```text
-authentication = sign_in_value * 0.60
-               + authentication_type * 0.40
-```
-
-The field named `sign_in_risk` is currently calculated as successful authentications divided by total authentication attempts. Higher values therefore represent more successful history, despite the field name.
-
-### Account experience
-
-Account experience is derived from the Keycloak creation timestamp and converted to approximate 30-day months. The implementation then assigns a discrete score based on account tenure.
+The Trust Engine sends the score and a breakdown per factor to the Policy Engine. The scores per factor, the reasons for the weights, the factors we removed and the bugs we fixed are in [trust-model.md](trust-model.md).
 
 ## Policy Decision
 
@@ -144,7 +115,7 @@ The Policy Engine begins with an allow verdict and changes it to deny when:
 - an Approver score is below `approverThreshold`;
 - a Security Viewer score is below `securityViewerThreshold`;
 - a Policy Administrator score is below `adminThreshold`; or
-- the sign-in value is below `signInRiskThreshold`.
+- the sign-in success rate is below `signInSuccessThreshold`.
 
 Thresholds and contextual categories are configured in `policyConfiguration.yml` and can also be updated through the Web UI policy page.
 
@@ -277,7 +248,7 @@ Verify that the user has an application client role and matching records in `dat
 | `web/extensions.py` | Shared objects: login (`oidc`), the PAM database (`db`) and the Keycloak clients |
 | `web/models.py` | PAM database tables (`AccessRequest`, `Approver`) |
 | `web/routes/` | The pages, one blueprint per area: `auth`, `access`, `resources`, `policy_config`, `monitoring`, `privileged_access` |
-| `cyberdome/trust_algorithm.py` | Trust-score calculations |
+| `cyberdome/trust_algorithm.py` | Trust-score calculations: 7 factors and their weights (see `trust-model.md`) |
 | `cyberdome/data_paths.py` | Locations of the shared data and config files |
 | `cyberdome/settings.py` | Settings and secrets from environment variables and `.env` |
 | `cyberdome/trust_signals.py` | Event processing and JSON lookups |

@@ -11,6 +11,8 @@ from flask import Blueprint, render_template, request
 
 from authz import protected_resource
 from cyberdome.data_paths import POLICY_CONFIG_FILE
+from cyberdome.policy import load_policy_configuration
+from cyberdome.trust_algorithm import FACTOR_LABELS, trust_weights
 from models import AccessRequest
 
 bp = Blueprint('policy_config', __name__)
@@ -52,21 +54,13 @@ def receive_policy_configurations():
 @bp.route('/configurePolicies', methods=['POST','GET'])
 @protected_resource('policy_configuration')
 def configure_policies():
-    # Retrieve the access duration from the database for the latest approved request ID
-
-    latest_access_request = AccessRequest.query.order_by(AccessRequest.id.desc()).limit(1).all()  # Adjust 'limit' as needed
-
+    # The countdown uses the access duration of the latest PAM request. Without one, the page shows without a countdown.
+    latest_access_request = AccessRequest.query.order_by(AccessRequest.id.desc()).first()
+    expiration_time = None
     if latest_access_request:
+        expiration_time = datetime.now() + timedelta(minutes=latest_access_request.access_duration)
 
-        access_duration = 0
-
-        for request in latest_access_request:
-            access_duration = request.access_duration
-
-            # Get the current time
-            current_time = datetime.now()
-
-            # Calculate the expiration time by adding access duration to the current time
-            expiration_time = current_time + timedelta(minutes=access_duration)
-
-            return render_template('policy_configuration.html', expiration_time=expiration_time)
+    # The fields show the saved settings, so saving doesn't reset anything to defaults
+    config = load_policy_configuration()
+    return render_template('policy_configuration.html', expiration_time=expiration_time, config=config,
+                           weights=trust_weights(config), factor_labels=FACTOR_LABELS)

@@ -20,8 +20,8 @@ import traceback
 from p2pnetwork.node import Node
 from . import trust_algorithm as ta
 from .policy import make_access_decision
-from .trust_signals import get_latest_access_request, get_latest_auth_data, get_user_identity_data_by_id
-from .data_paths import ACCESS_DECISIONS_FILE, ACCESS_REQUESTS_FILE, AUTH_DATA_FILE, USER_DATA_FILE
+from .trust_signals import get_latest_access_request, get_sign_in_success_rate, get_user_identity_data_by_id
+from .data_paths import ACCESS_DECISIONS_FILE, ACCESS_REQUESTS_FILE, USER_DATA_FILE
 
 ACCESS_PROXY_ID = '1'
 TRUST_ENGINE_ID = '2'
@@ -202,9 +202,13 @@ class TrustEngineNode(Networking):
             # If scoring fails (for example, no login data for the user yet), the Policy Engine
             # still gets an answer, and denies with this reason, instead of the request timing out
             trust_error = None
+            trust_factors = None
             try:
-                user_trust_score = ta.calculate_overall_trust_score(user_id, access_request)
+                trust = ta.calculate_trust_breakdown(user_id, access_request)
+                user_trust_score, trust_factors = trust['score'], trust['factors']
                 print(f"Subject({user_id}) Trust Score: {user_trust_score}")
+                for factor, details in trust_factors.items():
+                    print(f"    {factor}: {details['score']} x {details['weight']} ({details['reason']})")
             except Exception as e:
                 traceback.print_exc()
                 user_trust_score = None
@@ -218,6 +222,7 @@ class TrustEngineNode(Networking):
                 'intent': 'request_access_decision',
                 'access_request': access_request,
                 'user_trust_score': user_trust_score,
+                'trust_factors': trust_factors,
                 'trust_error': trust_error
             }
             self.send_message_to_node(POLICY_ENGINE_ID,data)
@@ -236,30 +241,28 @@ class PolicyEngineNode(Networking):
             return 0, message.get('trust_error') or 'No trust score for this request'
 
         user_identity_data = get_user_identity_data_by_id(user_id,USER_DATA_FILE)
-        user_auth_data = get_latest_auth_data(user_id, AUTH_DATA_FILE)
+        sign_in_success_rate = get_sign_in_success_rate(user_id)
 
-        print(f"Latest Authentication Data for the user: {user_auth_data}")
         print(f"User Identity Data: {user_identity_data}")
 
         if not user_identity_data:
             return 0, 'No identity record for this user'
-        if not user_auth_data:
+        if sign_in_success_rate is None:
             return 0, 'No login history for this user'
 
         # Retrieving user_role from user_identity_data
         user_role = user_identity_data.get('user_role')
         print(f"User Role: {user_role}")
 
-        # Retrieving sign_in_risk from user_auth_data
-        sign_in_risk = user_auth_data.get('sign_in_risk')
-        print(f"Sign In Risk: {sign_in_risk}")
+        # The share of successful logins over the user's last 10 attempts (higher is better)
+        print(f"Sign-in success rate: {sign_in_success_rate}")
 
         # Call the access decision script /function here to return the verdict
-        verdict = make_access_decision(user_role,user_trust_score,sign_in_risk)
+        verdict = make_access_decision(user_role,user_trust_score,sign_in_success_rate)
         if verdict:
-            reason = f"Allowed: trust score {user_trust_score:.2f} and sign-in value {sign_in_risk:.2f} meet the policy thresholds for role {user_role}"
+            reason = f"Allowed: trust score {user_trust_score:.2f} and sign-in success rate {sign_in_success_rate:.2f} meet the policy thresholds for role {user_role}"
         else:
-            reason = f"Denied: trust score {user_trust_score:.2f} or sign-in value {sign_in_risk:.2f} is below the policy threshold for role {user_role}"
+            reason = f"Denied: trust score {user_trust_score:.2f} or sign-in success rate {sign_in_success_rate:.2f} is below the policy threshold for role {user_role}"
         return verdict, reason
 
     def process_message_from_trust_engine(self, sender, message):
@@ -306,6 +309,7 @@ class PolicyEngineNode(Networking):
                 'action': access_request.get('action'),
                 'intent': 'request_access_decision',
                 'user_trust_score': user_trust_score,
+                'trust_factors': message.get('trust_factors'),
                 'access_decision': verdict,
                 'reason': reason,
                 'decided_by': 'Policy Engine',

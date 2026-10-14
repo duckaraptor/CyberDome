@@ -1,12 +1,11 @@
+accessFrequencyMaxRequests: 30
+accessFrequencyWindowMinutes: 5
 adminThreshold: '0.6'
 approverThreshold: '0.9'
-authScoreWeight: '0.5'
-contextScoreWeight: '0.5'
-expScoreWeight: '0.5'
 highRiskLocations:
-- KE
+- KP
 lowRiskLocations:
-- ''
+- SE
 mediumRiskLocations:
 - KE
 periodEndInput: 06:00:00
@@ -46,5 +45,12 @@ resources:
     description: Access tokens (sensitive)
     path: /resource-2
 securityViewerThreshold: '0.4'
-signInRiskThreshold: '0.5'
-userIdentityWeight: '0.5'
+signInSuccessThreshold: '0.5'
+trustWeights:
+  accessFrequency: 0.15
+  accessTime: 0.1
+  accountAge: 0.05
+  device: 0.2
+  identityStrength: 0.15
+  location: 0.15
+  loginHistory: 0.2
