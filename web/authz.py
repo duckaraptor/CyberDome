@@ -3,10 +3,10 @@
 Access checks for the Web UI's pages.
 
     @require_authentication           the user must be logged in, with a token Keycloak says is still active
-    @require_role('resource_1')       the same, and one of the user's roles must be allowed for the resource,
-                                      according to the "resources" table in policyConfiguration.yml
     @protected_resource('resource_1') the same, and the request goes through the Access Proxy, Trust Engine
                                       and Policy Engine. The page only runs if the Policy Engine allows it.
+                                      The Policy Engine checks the role table and the other policies
+                                      (cyberdome/policy.py, docs/policies.md).
 
 Each check asks Keycloak about the token once (token introspection) and keeps the
 answer in flask.g for the page: g.token_info and g.user_roles.
@@ -17,7 +17,6 @@ import functools
 from flask import g, make_response, render_template
 from keycloak.exceptions import KeycloakError
 
-from cyberdome.access_rules import allowed_roles, get_resource, is_role_allowed
 from extensions import keycloak_openid, oidc
 from keycloak_config import KEYCLOAK_CLIENT_ID
 from proxy_client import request_access_decision
@@ -66,33 +65,11 @@ def require_authentication(view):
     return wrapped
 
 
-def require_role(resource):
-    def decorator(view):
-        @functools.wraps(view)
-        def check_role(*args, **kwargs):
-            entry = get_resource(resource)
-            if entry is None:
-                # Fail closed: a page protected by a resource missing from the table is refused
-                return access_denied(403, 'Access denied', f'"{resource}" is not in the resource table, so nobody can access it.', resource)
-
-            if not is_role_allowed(g.user_roles, resource):
-                user_roles = ', '.join(g.user_roles) or 'no role'
-                return access_denied(403, 'Access denied',
-                                     f'Your role ({user_roles}) is not allowed to access {entry.get("description", resource)}. '
-                                     f'Allowed roles: {", ".join(allowed_roles(resource))}.', resource)
-
-            return view(*args, **kwargs)
-
-        # Authentication runs first, then the role check
-        return require_authentication(check_role)
-
-    return decorator
-
-
 def protected_resource(resource):
     # Every request for this resource goes through Access Proxy -> Trust Engine -> Policy Engine,
     # and the page only runs if the Policy Engine allows it. A direct URL takes the same path.
-    # Until the Policy Engine has the role table (assignment section 3.4), require_role stays as a first gate.
+    # The Web UI only checks the login, because it needs a valid token to build the request record.
+    # The Policy Engine decides everything else, including the role table (policy P2).
     def decorator(view):
         @functools.wraps(view)
         def mediate(*args, **kwargs):
@@ -106,7 +83,10 @@ def protected_resource(resource):
             if decision.get('access_decision') != 1:
                 status = decision.get('http_status', 403)
                 title = 'Access denied' if status == 403 else 'Cannot check your request'
-                response = make_response(access_denied(status, title, decision.get('reason') or 'Denied by the policy.', resource))
+                reason = decision.get('reason') or 'Denied by the policy.'
+                if decision.get('policy_id'):
+                    reason = f"{decision['policy_id']} {decision.get('policy_name', '')}: {reason}"
+                response = make_response(access_denied(status, title, reason, resource))
             else:
                 remember_device(access_request['username'], access_request['device_id'])
                 response = make_response(view(*args, **kwargs))
@@ -115,8 +95,9 @@ def protected_resource(resource):
             response.headers['X-CyberDome-Request-Id'] = str(decision.get('request_id'))
             response.headers['X-CyberDome-Decision'] = 'ALLOW' if decision.get('access_decision') == 1 else 'DENY'
             response.headers['X-CyberDome-Decided-By'] = str(decision.get('decided_by'))
+            response.headers['X-CyberDome-Policy'] = str(decision.get('policy_id'))
             return response
 
-        return require_role(resource)(mediate)
+        return require_authentication(mediate)
 
     return decorator

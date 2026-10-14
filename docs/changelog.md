@@ -4,6 +4,40 @@ This file records the changes we make to CyberDome, newest first. For each fix w
 
 ## 2026-10-14
 
+### Added: six named policies in the Policy Engine (assignment section 3.4)
+
+Branch: `feat-policy-engine`. The policies and the reasons behind them are in `docs/policies.md`.
+
+**What we saw:** The Policy Engine had one trust threshold per role (Approver 0.9, Policy Administrator 0.6, Security Viewer 0.4) and one sign-in check. Researcher and Administrator had no threshold, so they were never denied for low trust. The Policy Engine didn't know which resource was requested, and it read only the user's first role from `data/user_data.json`. The role table was checked by the Web UI, so requests with the wrong role never reached the Policy Engine and weren't decided or logged there. Decisions said allow or deny, but not which rule decided.
+
+**What we changed:**
+
+- `cyberdome/policy.py` is rewritten with six named policies, checked in order. The first one that denies decides:
+  - P1 Invalid authentication (`AUTHENTICATION_FAILURE`)
+  - P2 Unauthorized resource (`POLICY_VIOLATION`): the role isn't allowed the resource, or the request changes something (`write`) and the role may only read
+  - P3 Risky context, depending on the role: a high-risk country (everyone), a medium-risk country (privileged roles), the night window (privileged roles, or anyone on an admin resource), or too many failed logins
+  - P4 Admin resource: needs a trust score of at least `adminMinTrustScore`
+  - P5 Low trust: the score is below the resource's `minTrustScore`. The reason names the two weakest trust factors
+  - P6 Permitted access
+- Every decision has `decision`, `outcome`, `policy_id`, `policy_name` and `reason`. The Policy Engine saves them in `data/access_decision.json`, together with the trust score and breakdown.
+- The old per-role function is kept as the commented-out `retired_make_access_decision`, for comparison.
+- The Policy Engine uses all roles from the token (in the request record), not the first role from `user_data.json`.
+- `web/authz.py`: the Web UI no longer checks the role table (`require_role` is removed). It only checks the login, and the Policy Engine decides the rest. Refused pages show the policy and the reason. Responses have a new `X-CyberDome-Policy` header.
+- `policyConfiguration.yml`: each resource has a `minTrustScore` (`resource_1` 0.6, `resource_2` 0.75, `pam_approval` 0.75, `policy_configuration` 0.6, `logging` 0.6) and a `writeRoles` list (only `pam_approval`: Approver, and `policy_configuration`: Policy Administrator). New settings: `adminMinTrustScore` (0.75) and `privilegedRoles` (Administrator, Policy Administrator, Approver). The three role thresholds are removed.
+- Separation of duties: an Administrator may view the policy page but not save it. Only a Policy Administrator may change the policies.
+- So that each policy uses both identity or role and request context (as the task asks), P2 checks the action and P3 depends on the role. The first version of P2 only looked at the resource, and P3 never looked at the role.
+- The policy page shows the minimum per resource and the admin minimum instead of the role thresholds. When saving, the server only changes the minimums, never the allowed roles or the admin flag.
+- New `cyberdome/config.py` reads `policyConfiguration.yml`. It used to be in `policy.py`, but `policy.py` and `trust_algorithm.py` now use each other's code, and Python can't import two files that import each other.
+- New `tests/test_policies.py`: 29 tests for each policy, write roles, role-dependent context, the order of the policies and the five scenarios of the task. They don't need Keycloak or the engines. All 29 passed.
+- `tests/check_access_control.py`: a wrong role, or a write without a write role, is now expected to be decided by the engines and denied by P2. The decisions must have a policy and the trust breakdown, scenario 2 must be saved as `POLICY_VIOLATION`, and separation of duties is checked. Where trust can decide (P4, P5), a deny is accepted, because running the test several times in a row counts as a burst of requests. All 72 checks passed, five runs in a row.
+- **Fixed: the decision was sent before it was saved.** The Policy Engine sent each decision to the Web UI and only then rewrote `data/access_decision.json`. A reader (our test) could read the file while it was half written and crash. Now the decision is saved first (so it's logged before access is given), through a temporary file that is swapped in, so the file is never half written.
+- **Fixed: the first request after a restart of the Web UI could time out (`504`).** The engines kept the old, dead connection to the Web UI for a moment, and sent the verdict there. Now a node that connects again with the same ID replaces its old connection, and messages go to the newest connection. This bug was there since step 2.
+- Docs: new `docs/policies.md`, and the access-decision flow, policy and role sections of `docs/how-it-works.md` are updated.
+
+**Effect:** each request reads and rewrites `data/access_requests.json` and `data/access_decision.json` in full, and the decisions are bigger now (trust breakdown). After many test runs (about 1 MB of decisions) a request took about 45 ms instead of 21 ms. We'll fix this in section 3.5 with a log that only appends.
+
+alice (Approver) is now allowed on the PAM approval pages. Before, she needed 0.9, which nobody reached. bob on Resource 2 is now denied by P2 with a logged reason, instead of by the Web UI without a decision.
+
 ### Changed: a new trust model with 7 factors and configurable weights (assignment section 3.3)
 
 Branch: `feat-trust-engine`. The full model and the reasons are in `docs/trust-model.md`.

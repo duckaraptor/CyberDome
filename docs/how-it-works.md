@@ -57,15 +57,14 @@ User -> Authentication -> Access Proxy -> Trust Engine -> Policy Engine -> Allow
 
 1. The user opens a protected page, for example `/resource-1`.
 2. `@protected_resource` (`web/authz.py`) checks the login and asks Keycloak whether the token is still active. Otherwise: login redirect or `401`.
-3. The role table in `policyConfiguration.yml` is checked as a first gate. Otherwise: `403`. (This moves into the Policy Engine with the policies of section 3.4.)
-4. The Web UI builds the request record on the server (`web/request_context.py`, see Request Record below): user, roles, resource, action, time, authentication status, source IP and its location, device ID, and device type, OS and browser. It appends the record to `data/access_requests.json` with a new `ID`.
-5. The Web UI's node 4 (`web/proxy_client.py`, one node shared by all requests on port `8004`) sends the record to the Access Proxy on port `8001`.
-6. The Access Proxy checks the record is complete (ID, user, resource, action, authentication status), stamps it as mediated, and forwards the whole record to the Trust Engine on port `8002`. An incomplete record is rejected with a reason.
-7. The Trust Engine scores this request and sends the record and score to the Policy Engine on port `8003`. If scoring fails, it sends the error instead.
-8. The Policy Engine decides, writes the decision (with resource, action, trust score and reason) to `data/access_decision.json`, and sends it to node 4.
-9. The page runs only if the decision is allow. Otherwise the user sees `403` with the reason. No verdict within 10 seconds gives `504`, and an unreachable Access Proxy gives `503`. Both deny access.
+3. The Web UI builds the request record on the server (`web/request_context.py`, see Request Record below): user, roles, resource, action, time, authentication status, source IP and its location, device ID, and device type, OS and browser. It appends the record to `data/access_requests.json` with a new `ID`.
+4. The Web UI's node 4 (`web/proxy_client.py`, one node shared by all requests on port `8004`) sends the record to the Access Proxy on port `8001`.
+5. The Access Proxy checks the record is complete (ID, user, resource, action, authentication status), stamps it as mediated, and forwards the whole record to the Trust Engine on port `8002`. An incomplete record is rejected with a reason.
+6. The Trust Engine scores this request and sends the record, the score and its breakdown to the Policy Engine on port `8003`. If scoring fails, it sends the error instead.
+7. The Policy Engine applies the policies P1 to P6 (see Policy Decision below), writes the decision (with resource, action, trust score and breakdown, policy, outcome and reason) to `data/access_decision.json`, and sends it to node 4.
+8. The page runs only if the decision is allow. Otherwise the user sees `403` with the policy and the reason. No verdict within 10 seconds gives `504`, and an unreachable Access Proxy gives `503`. Both deny access.
 
-The response carries `X-CyberDome-Request-Id`, `X-CyberDome-Decision` and `X-CyberDome-Decided-By` headers, so each page can be traced to its decision.
+The response carries `X-CyberDome-Request-Id`, `X-CyberDome-Decision`, `X-CyberDome-Decided-By` and `X-CyberDome-Policy` headers, so each page can be traced to its decision.
 
 The access request's `ID` travels through the engines as `request_id`, so each verdict can be matched to its request. Each node is its own class in `cyberdome/networking.py` and only handles the messages it expects. Messages are Python dictionaries wrapped with a sender ID and exchanged by `p2pnetwork` over localhost TCP connections.
 
@@ -110,14 +109,18 @@ The Trust Engine sends the score and a breakdown per factor to the Policy Engine
 
 ## Policy Decision
 
-The Policy Engine begins with an allow verdict and changes it to deny when:
+The Policy Engine checks six named policies in order. The first one that denies decides. If none denies, P6 allows.
 
-- an Approver score is below `approverThreshold`;
-- a Security Viewer score is below `securityViewerThreshold`;
-- a Policy Administrator score is below `adminThreshold`; or
-- the sign-in success rate is below `signInSuccessThreshold`.
+| ID | Policy | Denies when | Outcome |
+| --- | --- | --- | --- |
+| P1 | Invalid authentication | The user is not authenticated, or no login is recorded | `AUTHENTICATION_FAILURE` |
+| P2 | Unauthorized resource | None of the user's roles is allowed the resource, or a `write` without a role in `writeRoles` | `POLICY_VIOLATION` |
+| P3 | Risky context | High-risk country, medium-risk country or night window for privileged roles, admin resource at night, or too many failed logins | `DENY` |
+| P4 | Admin resource | An admin resource and a trust score below `adminMinTrustScore` | `DENY` |
+| P5 | Low trust | The trust score is below the resource's `minTrustScore` | `DENY` |
+| P6 | Permitted access | (allows) | `ALLOW` |
 
-Thresholds and contextual categories are configured in `policyConfiguration.yml` and can also be updated through the Web UI policy page.
+The minimum trust score is set per resource in the `resources` table of `policyConfiguration.yml`, and can be changed on the policy page. The rules, settings and the reasons behind them are in [policies.md](policies.md).
 
 ## Role-Based Access to Pages
 
@@ -125,9 +128,9 @@ Every protected page checks the user before it runs (`web/authz.py`):
 
 1. Not logged in: redirect to the Keycloak login.
 2. Token no longer active (introspection): `401`.
-3. None of the user's roles is allowed for the page's resource: `403`.
+3. Everything else is decided by the Policy Engine. None of the user's roles is allowed for the page's resource: `403`, policy P2.
 
-The allowed roles per resource are in the `resources` section of `policyConfiguration.yml`. The policy page rewrites this file when it saves, so keys get sorted and comments are dropped.
+The allowed roles per resource are in the `resources` section of `policyConfiguration.yml`. They can only be changed in the file, not on the policy page. The policy page rewrites this file when it saves, so keys get sorted and comments are dropped.
 
 ## Privileged Access Management
 
@@ -199,7 +202,6 @@ This command destroys all local identity data.
 - JSON files are shared mutable state without locking or transactions.
 - The device ID is a cookie, so a user can delete or copy it. On localhost the location is always `LOCAL`.
 - Trust scoring expects complete identity, authentication, and request records plus a numeric account timestamp.
-- Pages now check roles against the resource table, but the Policy Engine's own role thresholds still don't deny users with an unknown role.
 - The Web UI's secrets come from `.env`, but the identity stack's local passwords are still in `compose.yml` and `infra/` (Postgres, LDAP admin, Keycloak admin, and the seeded users). The `ZeroTrustPlatform` client secret is also in `infra/keycloak/myrealm-realm.json`, and `KEYCLOAK_CLIENT_SECRET` must match it.
 - Flask debug mode and Keycloak development mode are enabled.
 
@@ -236,14 +238,15 @@ Verify that the user has an application client role and matching records in `dat
 | `engines/trust_engine.py` | Trust Engine process, node 2 |
 | `engines/policy_engine.py` | Policy Engine process, node 3 |
 | `cyberdome/networking.py` | Peer-to-peer nodes: a `Networking` base class plus `AccessProxyNode`, `TrustEngineNode`, `PolicyEngineNode` and `WebUINode` |
-| `cyberdome/policy.py` | Policy rules: role thresholds and the sign-in check |
+| `cyberdome/policy.py` | The policies P1 to P6 (see `policies.md`) |
+| `cyberdome/config.py` | Reads `policyConfiguration.yml` |
 | `scripts/` | Launchers: `runAll.sh` for the three engines, `runWebUI.sh` for the Web UI, and one script per engine |
 | `tests/` | Manual check scripts: `test.py` prints one user's trust score, `testAP.py` runs a stand-alone Access Proxy |
 | `compose.yml` | Local identity and database stack |
 | `infra/keycloak/` | Seeded Keycloak realm |
 | `infra/openldap/` | OpenLDAP image and seed LDIF |
 | `web/app.py` | Creates the Flask app, loads its settings and registers the pages |
-| `web/authz.py` | Page checks: `@require_authentication` (login and active token) and `@require_role(resource)` (role table) |
+| `web/authz.py` | Page checks: `@require_authentication` (login and active token) and `@protected_resource(resource)` (sends the request through the engines) |
 | `cyberdome/access_rules.py` | Reads the role-to-resource table from `policyConfiguration.yml` |
 | `web/extensions.py` | Shared objects: login (`oidc`), the PAM database (`db`) and the Keycloak clients |
 | `web/models.py` | PAM database tables (`AccessRequest`, `Approver`) |

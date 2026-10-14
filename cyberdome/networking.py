@@ -19,9 +19,9 @@ from datetime import datetime
 import traceback
 from p2pnetwork.node import Node
 from . import trust_algorithm as ta
-from .policy import make_access_decision
-from .trust_signals import get_latest_access_request, get_sign_in_success_rate, get_user_identity_data_by_id
-from .data_paths import ACCESS_DECISIONS_FILE, ACCESS_REQUESTS_FILE, USER_DATA_FILE
+from . import policy
+from .trust_signals import get_latest_access_request, get_sign_in_success_rate
+from .data_paths import ACCESS_DECISIONS_FILE, ACCESS_REQUESTS_FILE
 
 ACCESS_PROXY_ID = '1'
 TRUST_ENGINE_ID = '2'
@@ -51,10 +51,12 @@ class Networking(Node):
 
 
     def send_message_to_node(self, node_id, message):
-        # Find the specific node by its ID
+        # Find the specific node by its ID. Newest connections are at the end of the list, so search
+        # from the end: after a restart (for example of the Web UI), the old, dead connection to the
+        # same ID can still be in the list for a moment, and a message sent to it would be lost.
         target_node = None
 
-        for node in self.all_nodes:
+        for node in reversed(self.all_nodes):
             if node.id == node_id:
                 target_node = node
                 #convert the message to a json object
@@ -102,6 +104,11 @@ class Networking(Node):
 
     def inbound_node_connected(self, node):
         print(f"\n{self.get_node_role(node.id)} Connected to {self.get_node_role(self.id)}")
+        # A node that connects again with the same ID (for example a restarted Web UI) replaces its
+        # old connection. Close the old one, so messages for that ID go to the new connection.
+        for old in [other for other in self.nodes_inbound if other.id == node.id and other is not node]:
+            print(f"Closing the old connection of {self.get_node_role(old.id)}")
+            old.stop()
 
     def inbound_node_disconnected(self, node):
         print(f"\n{self.get_node_role(node.id)} DISCONNECTED from {self.get_node_role(self.id)}")
@@ -232,38 +239,15 @@ class PolicyEngineNode(Networking):
     '''Node 3: applies the policies to the request, saves the decision and sends it, with a reason, to the Web UI.'''
     NODE_ID = POLICY_ENGINE_ID
 
-    def decide(self, message):
-        # Returns (verdict, reason). Fails closed: anything missing means deny.
+    def decide(self, message, access_request):
+        # Applies the policies P1 to P6 (cyberdome/policy.py) to this request.
+        # Fails closed: a missing trust score or login history means deny, with the reason.
         user_id = message.get('user_id')
-        user_trust_score = message.get('user_trust_score')
-
-        if message.get('trust_error') or user_trust_score is None:
-            return 0, message.get('trust_error') or 'No trust score for this request'
-
-        user_identity_data = get_user_identity_data_by_id(user_id,USER_DATA_FILE)
         sign_in_success_rate = get_sign_in_success_rate(user_id)
-
-        print(f"User Identity Data: {user_identity_data}")
-
-        if not user_identity_data:
-            return 0, 'No identity record for this user'
-        if sign_in_success_rate is None:
-            return 0, 'No login history for this user'
-
-        # Retrieving user_role from user_identity_data
-        user_role = user_identity_data.get('user_role')
-        print(f"User Role: {user_role}")
-
         # The share of successful logins over the user's last 10 attempts (higher is better)
         print(f"Sign-in success rate: {sign_in_success_rate}")
-
-        # Call the access decision script /function here to return the verdict
-        verdict = make_access_decision(user_role,user_trust_score,sign_in_success_rate)
-        if verdict:
-            reason = f"Allowed: trust score {user_trust_score:.2f} and sign-in success rate {sign_in_success_rate:.2f} meet the policy thresholds for role {user_role}"
-        else:
-            reason = f"Denied: trust score {user_trust_score:.2f} or sign-in success rate {sign_in_success_rate:.2f} is below the policy threshold for role {user_role}"
-        return verdict, reason
+        return policy.decide(access_request, message.get('user_trust_score'), message.get('trust_factors'),
+                             sign_in_success_rate, message.get('trust_error'))
 
     def process_message_from_trust_engine(self, sender, message):
         print(f"Received a message from Trust Engine Node [{sender}]: {message}")
@@ -281,9 +265,9 @@ class PolicyEngineNode(Networking):
             # The location is the country code of the user's IP (LOCAL on localhost)
             print(f"Location: {access_request.get('location')}")
 
-            verdict, reason = self.decide(message)
+            decision = self.decide(message, access_request)
 
-            print(f"Policy Engine Verdict: {verdict} ({reason})")
+            print(f"Policy Engine Verdict: {decision['decision']} by {decision['policy_id']} {decision['policy_name']} ({decision['reason']})")
 
             file_path = ACCESS_DECISIONS_FILE
 
@@ -310,20 +294,25 @@ class PolicyEngineNode(Networking):
                 'intent': 'request_access_decision',
                 'user_trust_score': user_trust_score,
                 'trust_factors': message.get('trust_factors'),
-                'access_decision': verdict,
-                'reason': reason,
+                'access_decision': decision['access_decision'],
+                'decision': decision['decision'],
+                'outcome': decision['outcome'],
+                'policy_id': decision['policy_id'],
+                'policy_name': decision['policy_name'],
+                'reason': decision['reason'],
                 'decided_by': 'Policy Engine',
                 'decided_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             }
 
-            self.send_message_to_node(WEB_UI_ID,access_decision_data)
-
-            # Append the new access decision data to the existing list
+            # Save the decision before sending it, so it is logged before access is given.
+            # Write to a temporary file and swap it in, so nobody ever reads a half-written file.
             access_decisions.append(access_decision_data)
-
-            # Write the updated data to the JSON file
-            with open(file_path, 'w') as file:
+            temporary_path = file_path + '.tmp'
+            with open(temporary_path, 'w') as file:
                 json.dump(access_decisions, file, indent=4)
+            os.replace(temporary_path, file_path)
+
+            self.send_message_to_node(WEB_UI_ID,access_decision_data)
 
 
 class WebUINode(Networking):

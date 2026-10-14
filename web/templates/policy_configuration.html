@@ -46,21 +46,22 @@
         </div>
         <!-- End of Trust Score Weights Section -->
 
-        <!-- Trust Score Threshold for User Roles Section -->
+        <!-- Minimum Trust Score per Resource Section (policies P4 and P5, see docs/policies.md) -->
         <div class="section">
-            <div class="section-title">Trust Score Threshold for User Roles</div>
+            <div class="section-title">Minimum Trust Score per Resource</div>
+            <div class="hint">A request is denied (policy P5) when its trust score is below the resource's minimum. The allowed roles can only be changed in policyConfiguration.yml.</div>
             <div class="section-content">
-                <div class="segment-name">Approver</div>
-                <input id="approverThreshold" type="number" step="0.1" min="0" max="1" value="{{ config.get('approverThreshold', 0.9) }}">
+                {% for resource, entry in (config.get('resources') or {}).items() %}
+                <div class="segment-name">{{ entry.get('description', resource) }} ({{ resource }}{% if entry.get('adminResource') %}, admin{% endif %})</div>
+                <input class="resource-min-trust" data-resource="{{ resource }}" type="number" step="0.05" min="0" max="1" value="{{ entry.get('minTrustScore', 0) }}">
+                {% endfor %}
 
-                <div class="segment-name">Policy Administrator</div>
-                <input id="adminThreshold" type="number" step="0.1" min="0" max="1" value="{{ config.get('adminThreshold', 0.6) }}">
-
-                <div class="segment-name">Security Viewer</div>
-                <input id="securityViewerThreshold" type="number" step="0.1" min="0" max="1" value="{{ config.get('securityViewerThreshold', 0.4) }}">
+                <div class="segment-name">Minimum Trust Score for Admin Resources</div>
+                <div class="hint">Admin resources also need at least this score (policy P4).</div>
+                <input id="adminMinTrustScore" type="number" step="0.05" min="0" max="1" value="{{ config.get('adminMinTrustScore', 0.75) }}">
             </div>
         </div>
-        <!-- End of Trust Score Threshold for User Roles Section -->
+        <!-- End of Minimum Trust Score per Resource Section -->
 
         <div class="section">
             <div class="section-title">Contextual Policy Configurations</div>
@@ -83,12 +84,12 @@
 
                 <!-- Sign-in Success Threshold -->
                 <div class="segment-name">Sign-in Success Threshold</div>
-                <div class="hint">Deny when fewer than this share of the user's last 10 logins succeeded.</div>
+                <div class="hint">Deny (policy P3) when fewer than this share of the user's last 10 logins succeeded.</div>
                 <input id="signInSuccessThreshold" type="number" step="0.1" min="0" max="1" value="{{ config.get('signInSuccessThreshold', 0.5) }}">
 
                 <!-- Night window, used by the time of access factor -->
                 <div class="segment-name">Suspicious Access Request Time Boundary (night window)</div>
-                <div class="hint">Can cross midnight, for example 22:00:00 to 06:00:00.</div>
+                <div class="hint">Lowers the trust score, and admin resources are denied inside it (policy P3). Can cross midnight, for example 22:00:00 to 06:00:00.</div>
                 <div class="section-content">
                     <input id="periodStartInput" type="text" placeholder="Period Start (HH:MM:SS)" value="{{ config.get('periodStartInput', '') }}">
                     <input id="periodEndInput" type="text" placeholder="Period End (HH:MM:SS)" value="{{ config.get('periodEndInput', '') }}">
@@ -143,13 +144,17 @@
                 trustWeights[input.dataset.factor] = parseFloat(input.value) || 0;
             });
 
+            const resourceMinTrustScores = {};
+            document.querySelectorAll('.resource-min-trust').forEach(input => {
+                resourceMinTrustScores[input.dataset.resource] = parseFloat(input.value) || 0;
+            });
+
             const payload = {
                 trustWeights,
+                resourceMinTrustScores,
+                adminMinTrustScore: parseFloat(document.getElementById('adminMinTrustScore').value) || 0,
                 accessFrequencyWindowMinutes: parseInt(document.getElementById('accessFrequencyWindowMinutes').value, 10),
                 accessFrequencyMaxRequests: parseInt(document.getElementById('accessFrequencyMaxRequests').value, 10),
-                approverThreshold: document.getElementById('approverThreshold').value,
-                adminThreshold: document.getElementById('adminThreshold').value,
-                securityViewerThreshold: document.getElementById('securityViewerThreshold').value,
                 highRiskLocations: countryCodes('highRiskLocations'),
                 mediumRiskLocations: countryCodes('mediumRiskLocations'),
                 lowRiskLocations: countryCodes('lowRiskLocations'),

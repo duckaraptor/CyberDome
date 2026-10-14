@@ -12,7 +12,7 @@ The factors, weights and reasons are explained in docs/trust-model.md.
 from datetime import datetime
 
 from .data_paths import ACCESS_REQUESTS_FILE, USER_DATA_FILE
-from .policy import load_policy_configuration
+from .config import load_policy_configuration
 from .trust_signals import (count_recent_access_requests, get_latest_access_request, get_sign_in_success_rate,
                             get_user_identity_data_by_id)
 

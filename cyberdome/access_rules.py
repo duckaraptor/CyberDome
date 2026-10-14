@@ -8,7 +8,7 @@ The Web UI uses these rules to enforce access (web/authz.py). The Policy Engine
 will use the same table for its policies.
 
 '''
-from .policy import load_policy_configuration
+from .config import load_policy_configuration
 
 
 def load_resources():
@@ -31,6 +31,12 @@ def is_role_allowed(user_roles, resource):
     # Unknown resources and users without roles are denied.
     allowed = set(allowed_roles(resource))
     return bool(allowed & set(user_roles or []))
+
+
+def may_write(user_roles, resource):
+    # Changing the resource (an HTTP POST) needs a role in its writeRoles. Without writeRoles, nobody may.
+    entry = get_resource(resource) or {}
+    return bool(set(entry.get('writeRoles') or []) & set(user_roles or []))
 
 
 def is_admin_resource(resource):

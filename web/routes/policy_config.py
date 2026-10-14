@@ -11,7 +11,7 @@ from flask import Blueprint, render_template, request
 
 from authz import protected_resource
 from cyberdome.data_paths import POLICY_CONFIG_FILE
-from cyberdome.policy import load_policy_configuration
+from cyberdome.config import load_policy_configuration
 from cyberdome.trust_algorithm import FACTOR_LABELS, trust_weights
 from models import AccessRequest
 
@@ -28,6 +28,14 @@ def update_policy_configurations(data):
             existing_data = yaml.safe_load(file)
     except FileNotFoundError:
         existing_data = {}
+
+    # The page may change each resource's minimum trust score, but not the resource table itself
+    # (allowed roles, admin flag), so it can't be used to give a role more access
+    data = dict(data)
+    data.pop('resources', None)
+    for resource, minimum in (data.pop('resourceMinTrustScores', None) or {}).items():
+        if resource in (existing_data.get('resources') or {}):
+            existing_data['resources'][resource]['minTrustScore'] = float(minimum)
 
     existing_data.update(data)
 

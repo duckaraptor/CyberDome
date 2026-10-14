@@ -107,7 +107,7 @@ def privilegedAccess():
 @bp.route('/testing')
 @protected_resource('pam_approval')
 def testApproval():
-    #extract the approver's details (require_role has already checked that the user is an Approver)
+    #extract the approver's details (the Policy Engine has already checked that the user is an Approver, policy P2)
     auth_profile = session.get('oidc_auth_profile', {})
     username = auth_profile.get('name')
     email = auth_profile.get('email')

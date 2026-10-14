@@ -6,10 +6,11 @@ mediation and the request record (section 3.2).
 It logs in as real users through Keycloak (alice, bob, charlie, foo), opens every
 protected page as each one with Flask's test client, and checks the answer:
 
-    role not in the table          -> 403, and the request never reaches the engines
-    role in the table              -> the request goes through Access Proxy -> Trust Engine
-                                      -> Policy Engine. The page runs only if the Policy Engine
-                                      allows it, otherwise 403 with the Policy Engine's reason.
+    every request                  -> goes through Access Proxy -> Trust Engine -> Policy Engine
+    role not in the table          -> 403, denied by policy P2 (Unauthorized resource)
+    POST without a write role      -> 403, denied by policy P2 (may view but not change)
+    role in the table              -> the page runs only if the Policy Engine allows it,
+                                      otherwise 403 with the policy and its reason
     not logged in                  -> redirect to the Keycloak login
     fake or revoked token          -> 401 Invalid or expired token
 
@@ -29,6 +30,12 @@ Run from anywhere:  python3 tests/check_access_control.py
 Note: it adds access requests and decisions to data/, and posts an empty update to
 /receivePolicyConfigurations, which rewrites policyConfiguration.yml with the same content.
 
+Running it several times within 5 minutes sends more than 30 requests per user, which the
+Trust Engine counts as a burst (access frequency factor). Each run also uses new browsers
+(new devices). Then some users' trust scores drop, and requests can be denied by P4 or P5
+instead of allowed. The checks accept that wherever trust can decide. They only require
+P2 (the role table) to give the expected answer.
+
 '''
 import json
 import logging
@@ -47,7 +54,7 @@ sys.path.insert(0, os.path.join(REPO_ROOT, 'web'))
 logging.disable(logging.CRITICAL)
 
 import app as web_app  # noqa: E402  (needs the paths above)
-from cyberdome.access_rules import is_role_allowed  # noqa: E402
+from cyberdome.access_rules import is_role_allowed, may_write  # noqa: E402
 from cyberdome.data_paths import ACCESS_DECISIONS_FILE, ACCESS_REQUESTS_FILE  # noqa: E402
 from cyberdome.settings import KEYCLOAK_CLIENT_ID, KEYCLOAK_CLIENT_SECRET  # noqa: E402
 from keycloak_config import REVOCATION_URL, TOKEN_URL  # noqa: E402
@@ -165,23 +172,27 @@ def main():
         for resource, method, path in ROLE_PROTECTED:
             response = call(clients[username], method, path)
             label = f"{username:8} ({role}) {method:4} {path:30}"
-            if is_role_allowed([role], resource):
-                decision = response.headers.get('X-CyberDome-Decision')
-                ok = mediated(response) and ((decision == 'ALLOW' and response.status_code not in (401, 403)) or
-                                             (decision == 'DENY' and response.status_code == 403))
-                check(f"{label} expect mediated -> {decision}", ok,
+            decision = response.headers.get('X-CyberDome-Decision')
+            policy_id = response.headers.get('X-CyberDome-Policy')
+            if is_role_allowed([role], resource) and (method == 'GET' or may_write([role], resource)):
+                ok = mediated(response) and policy_id != 'P2' and (
+                    (decision == 'ALLOW' and response.status_code not in (401, 403)) or
+                    (decision == 'DENY' and response.status_code == 403))
+                check(f"{label} expect mediated -> {decision} ({policy_id})", ok,
                       f"got {response.status_code}, decided by {response.headers.get('X-CyberDome-Decided-By')}")
             else:
-                check(f"{label} expect 403, not sent to the engines", response.status_code == 403 and not mediated(response),
-                      f"got {response.status_code}")
+                check(f"{label} expect 403, denied by P2", response.status_code == 403 and mediated(response) and policy_id == 'P2',
+                      f"got {response.status_code}, policy {policy_id}")
 
     print("\n== Direct URL: the request goes through the engines, and the decision is saved with a reason")
     response = call(clients['bob'], 'GET', '/resource-1')
     request_id = response.headers.get('X-CyberDome-Request-Id')
     decision = saved_decision(request_id)
     check(f"bob GET /resource-1 directly is mediated (request {request_id})", mediated(response))
-    check("the decision is in data/access_decision.json with a trust score and a reason",
-          bool(decision and decision.get('reason') and decision.get('user_trust_score') is not None),
+    check("the decision is in data/access_decision.json with a trust score, a policy and a reason",
+          bool(decision and decision.get('reason') and decision.get('policy_id') and decision.get('user_trust_score') is not None),
+          f"saved decision: {decision}")
+    check("the saved decision has the trust breakdown (7 factors)", len((decision or {}).get('trust_factors') or {}) == 7,
           f"saved decision: {decision}")
     check("the saved decision is for this resource and action",
           bool(decision and decision.get('resource') == 'resource_1' and decision.get('action') == 'read'), f"saved decision: {decision}")
@@ -263,10 +274,22 @@ def main():
     response = call(clients['bob'], 'GET', '/resource-1')
     check("Scenario 1: bob (Researcher) opens Resource 1 -> 200, ALLOW by the Policy Engine",
           response.status_code == 200 and response.headers.get('X-CyberDome-Decision') == 'ALLOW')
-    check("Scenario 2: bob (Researcher) opens Resource 2 -> 403", call(clients['bob'], 'GET', '/resource-2').status_code == 403)
+    response = call(clients['bob'], 'GET', '/resource-2')
+    check("Scenario 2: bob (Researcher) opens Resource 2 -> 403, POLICY_VIOLATION by P2",
+          response.status_code == 403 and response.headers.get('X-CyberDome-Policy') == 'P2')
+    decision = saved_decision(response.headers.get('X-CyberDome-Request-Id')) or {}
+    check("Scenario 2: the saved decision has the outcome POLICY_VIOLATION and a reason",
+          decision.get('outcome') == 'POLICY_VIOLATION' and bool(decision.get('reason')), f"saved decision: {decision}")
     response = call(clients['charlie'], 'GET', '/configurePolicies')
     check("Scenario 5: charlie (Administrator) opens the policy configuration page -> mediated, ALLOW",
           mediated(response) and response.headers.get('X-CyberDome-Decision') == 'ALLOW' and response.status_code not in (401, 403))
+    response = call(clients['charlie'], 'POST', '/receivePolicyConfigurations')
+    check("Separation of duties: charlie (Administrator) may not save policies -> 403 by P2",
+          response.status_code == 403 and response.headers.get('X-CyberDome-Policy') == 'P2')
+    response = call(clients['foo'], 'POST', '/receivePolicyConfigurations')
+    policy_id = response.headers.get('X-CyberDome-Policy')
+    check(f"Separation of duties: foo (Policy Administrator) passes P2 for saving policies -> {response.headers.get('X-CyberDome-Decision')} ({policy_id})",
+          mediated(response) and policy_id in ('P6', 'P4', 'P5'), f"got {response.status_code}, policy {policy_id}")
 
     passed = sum(results)
     print(f"\n{passed}/{len(results)} checks passed")
