@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <link rel="stylesheet" href="{{url_for('static', filename='css/policy-configuration.css')}}">
+    <title>Policy Configuration Page</title>
+
+    <style>
+        /* Additional styles for countdown display */
+        #remainingTime {
+            font-size: 20px;
+            color: #4CAF50;
+            margin-top: 15px;
+        }
+        .hint {
+            color: #777;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Policy Configuration Page</h1>
+        <h2>Configure ZTA System Security Policies</h2>
+        <!-- Countdown display, only when the access comes from an approved PAM request -->
+        {% if expiration_time %}
+        <div id="remainingTime">Time Left: <span id="countdown"></span></div>
+        {% endif %}
+
+        <!-- Trust Score Weights Section (see docs/trust-model.md) -->
+        <div class="section">
+            <div class="section-title">Trust Score Weights</div>
+            <div class="hint">The Trust Engine divides by the sum of the weights, so they don't have to add up to exactly 1.</div>
+            <div class="section-content">
+                {% for factor, label in factor_labels.items() %}
+                <div class="segment-name">{{ label }}</div>
+                <input id="weight-{{ factor }}" class="trust-weight" data-factor="{{ factor }}" type="number" step="0.05" min="0" max="1" value="{{ weights[factor] }}">
+                {% endfor %}
+
+                <div class="segment-name">Access Frequency Window (minutes)</div>
+                <input id="accessFrequencyWindowMinutes" type="number" step="1" min="1" value="{{ config.get('accessFrequencyWindowMinutes', 5) }}">
+                <div class="segment-name">Access Frequency Maximum (requests in the window)</div>
+                <input id="accessFrequencyMaxRequests" type="number" step="1" min="1" value="{{ config.get('accessFrequencyMaxRequests', 30) }}">
+            </div>
+        </div>
+        <!-- End of Trust Score Weights Section -->
+
+        <!-- Minimum Trust Score per Resource Section (policies P4 and P5, see docs/policies.md) -->
+        <div class="section">
+            <div class="section-title">Minimum Trust Score per Resource</div>
+            <div class="hint">A request is denied (policy P5) when its trust score is below the resource's minimum. The allowed roles can only be changed in policyConfiguration.yml.</div>
+            <div class="section-content">
+                {% for resource, entry in (config.get('resources') or {}).items() %}
+                <div class="segment-name">{{ entry.get('description', resource) }} ({{ resource }}{% if entry.get('adminResource') %}, admin{% endif %})</div>
+                <input class="resource-min-trust" data-resource="{{ resource }}" type="number" step="0.05" min="0" max="1" value="{{ entry.get('minTrustScore', 0) }}">
+                {% endfor %}
+
+                <div class="segment-name">Minimum Trust Score for Admin Resources</div>
+                <div class="hint">Admin resources also need at least this score (policy P4).</div>
+                <input id="adminMinTrustScore" type="number" step="0.05" min="0" max="1" value="{{ config.get('adminMinTrustScore', 0.75) }}">
+            </div>
+        </div>
+        <!-- End of Minimum Trust Score per Resource Section -->
+
+        <div class="section">
+            <div class="section-title">Contextual Policy Configurations</div>
+
+            <!-- Geolocation Risk -->
+            <div class="segment-name">Geolocation Risk</div>
+            <div class="hint">Two-letter country codes, for example SE. LOCAL (localhost) always counts as low risk.</div>
+            <div class="section-content">
+                {% for list_id, label in [('highRiskLocations', 'High Risk Locations'), ('mediumRiskLocations', 'Medium Risk Locations'), ('lowRiskLocations', 'Low Risk Locations')] %}
+                <div class="segment-name">{{ label }}</div>
+                <div class="section-content" id="{{ list_id }}">
+                    {% for code in config.get(list_id) or [] %}
+                    <input class="risk-location" type="text" placeholder="Country Code" value="{{ code }}">
+                    {% else %}
+                    <input class="risk-location" type="text" placeholder="Country Code">
+                    {% endfor %}
+                    <button onclick="addLocation('{{ list_id }}')">Add {{ label[:-1] }}</button>
+                </div>
+                {% endfor %}
+
+                <!-- Sign-in Success Threshold -->
+                <div class="segment-name">Sign-in Success Threshold</div>
+                <div class="hint">Deny (policy P3) when fewer than this share of the user's last 10 logins succeeded.</div>
+                <input id="signInSuccessThreshold" type="number" step="0.1" min="0" max="1" value="{{ config.get('signInSuccessThreshold', 0.5) }}">
+
+                <!-- Night window, used by the time of access factor -->
+                <div class="segment-name">Suspicious Access Request Time Boundary (night window)</div>
+                <div class="hint">Lowers the trust score, and admin resources are denied inside it (policy P3). Can cross midnight, for example 22:00:00 to 06:00:00.</div>
+                <div class="section-content">
+                    <input id="periodStartInput" type="text" placeholder="Period Start (HH:MM:SS)" value="{{ config.get('periodStartInput', '') }}">
+                    <input id="periodEndInput" type="text" placeholder="Period End (HH:MM:SS)" value="{{ config.get('periodEndInput', '') }}">
+                </div>
+            </div>
+            <button onclick="saveConfigurations()">Save Configurations</button>
+        </div>
+    </div>
+
+    <script>
+        function addLocation(sectionId) {
+            const section = document.getElementById(sectionId);
+            const newInput = document.createElement('input');
+            newInput.className = 'risk-location';
+            newInput.type = 'text';
+            newInput.placeholder = 'New Country';
+            section.insertBefore(newInput, section.querySelector('button'));
+        }
+
+        {% if expiration_time %}
+        // Count down to the end of the approved PAM access time. The page no longer reloads
+        // itself, so what you type stays, and the page doesn't send a request every 5 seconds.
+        const expirationTime = new Date('{{ expiration_time }}');
+        function updateRemainingTime() {
+            const totalSeconds = Math.floor((expirationTime.getTime() - new Date().getTime()) / 1000);
+            const remainingTimeElement = document.getElementById('remainingTime');
+
+            if (totalSeconds <= 0) {
+                remainingTimeElement.textContent = "Time remaining: 0 minutes 0 seconds";
+                clearInterval(countdownInterval);
+                alert("YOUR ACCESS TIME HAS EXPIRED!");
+                window.location.href = '/revokeToken';
+            } else {
+                const minutes = Math.floor(totalSeconds / 60);
+                const seconds = totalSeconds % 60;
+                remainingTimeElement.textContent = "Time remaining: " + minutes + " minutes " + seconds + " seconds";
+            }
+        }
+        updateRemainingTime();
+        const countdownInterval = setInterval(updateRemainingTime, 1000);
+        {% endif %}
+
+        function countryCodes(listId) {
+            return Array.from(document.querySelectorAll('#' + listId + ' input'))
+                .map(input => input.value.trim().toUpperCase())
+                .filter(code => code !== '');
+        }
+
+        function saveConfigurations() {
+            const trustWeights = {};
+            document.querySelectorAll('.trust-weight').forEach(input => {
+                trustWeights[input.dataset.factor] = parseFloat(input.value) || 0;
+            });
+
+            const resourceMinTrustScores = {};
+            document.querySelectorAll('.resource-min-trust').forEach(input => {
+                resourceMinTrustScores[input.dataset.resource] = parseFloat(input.value) || 0;
+            });
+
+            const payload = {
+                trustWeights,
+                resourceMinTrustScores,
+                adminMinTrustScore: parseFloat(document.getElementById('adminMinTrustScore').value) || 0,
+                accessFrequencyWindowMinutes: parseInt(document.getElementById('accessFrequencyWindowMinutes').value, 10),
+                accessFrequencyMaxRequests: parseInt(document.getElementById('accessFrequencyMaxRequests').value, 10),
+                highRiskLocations: countryCodes('highRiskLocations'),
+                mediumRiskLocations: countryCodes('mediumRiskLocations'),
+                lowRiskLocations: countryCodes('lowRiskLocations'),
+                signInSuccessThreshold: document.getElementById('signInSuccessThreshold').value,
+                periodStartInput: document.getElementById('periodStartInput').value,
+                periodEndInput: document.getElementById('periodEndInput').value
+            };
+
+            fetch('/receivePolicyConfigurations', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            })
+            .then(response => {
+                if (response.ok) {
+                    alert('Policy Configurations have been saved successfully!');
+                    window.location.href = '/home';
+                } else {
+                    alert('Saving failed (' + response.status + ').');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Saving failed: ' + error);
+            });
+        }
+    </script>
+</body>
+</html>

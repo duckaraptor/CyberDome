@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <link rel="stylesheet" href="{{url_for('static', filename='css/resource-selection.css')}}">
+    <title>ZTA - Resource Selection</title>
+</head>
+<body>
+    <div class="container">
+        <h2>ZTA - Resource Selection</h2>
+        <p class="access-message">Please select one of the following protected resources:</p>
+        <div class="options">
+            <div class="option" id="resource1" role="button" tabindex="0" aria-label="Resource 1" onclick="openResource('/resource-1')">
+                <h3>01. Mobile Money Transactions</h3>
+                <p>View Transactions</p>
+            </div>
+            <div class="option" role="button" tabindex="0" aria-label="Resource 2" onclick="openResource('/resource-2')">
+                <h3>02. System API Keys and Access Tokens</h3>
+                <p>Securely Access System API Keys and Access Tokens for Fintech Services</p>
+            </div>
+            <!-- Add more resource options as needed -->
+        </div>
+        <div class="footer">
+            &copy; 2023 LeoTech
+        </div>
+    </div>
+
+    <script>
+        // Opening a resource sends the request through the Access Proxy, Trust Engine and
+        // Policy Engine on the server. The page opens if the Policy Engine allows it, and
+        // otherwise shows why access was denied.
+        function openResource(path) {
+            window.location.href = path;
+        }
+    </script>
+
+</body>
+</html>

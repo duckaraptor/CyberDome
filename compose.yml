@@ -1,0 +1,78 @@
+name: cyberdome
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: keycloak_dev
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - keycloak_postgres_data:/var/lib/postgresql/data
+
+  openldap:
+    build: ./infra/openldap
+    image: cyberdome-openldap:local
+    environment:
+      LDAP_ORGANISATION: CyberDome
+      LDAP_DOMAIN: leonet.cns
+      LDAP_BASE_DN: dc=leonet,dc=cns
+      LDAP_ADMIN_PASSWORD: admin_pass
+      LDAP_CONFIG_PASSWORD: config_pass
+      LDAP_TLS: "false"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - ldapsearch -x -H ldap://localhost:389 -D cn=admin,dc=leonet,dc=cns -w admin_pass -b dc=leonet,dc=cns >/dev/null 2>&1
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    ports:
+      - "389:389"
+    volumes:
+      - ldap_data:/var/lib/ldap
+      - ldap_config:/etc/ldap/slapd.d
+
+  phpldapadmin:
+    image: osixia/phpldapadmin:0.9.0
+    depends_on:
+      openldap:
+        condition: service_healthy
+    environment:
+      PHPLDAPADMIN_LDAP_HOSTS: openldap
+      PHPLDAPADMIN_HTTPS: "false"
+    ports:
+      - "8081:80"
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.4.0
+    command: ["start-dev", "--import-realm"]
+    depends_on:
+      openldap:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: keycloak_dev
+      KC_HTTP_RELATIVE_PATH: /auth
+      KC_HOSTNAME: localhost
+      KC_HOSTNAME_STRICT: "false"
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./infra/keycloak/myrealm-realm.json:/opt/keycloak/data/import/myrealm-realm.json:ro
+
+volumes:
+  keycloak_postgres_data:
+  ldap_config:
+  ldap_data:

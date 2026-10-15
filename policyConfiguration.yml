@@ -1,16 +1,70 @@
-adminThreshold: '0.6'
-approverThreshold: '0.9'
-authScoreWeight: '0.5'
-contextScoreWeight: '0.5'
-expScoreWeight: '0.5'
+accessFrequencyMaxRequests: 30
+accessFrequencyWindowMinutes: 5
+adminMinTrustScore: 0.75
 highRiskLocations:
-- KE
+- KP
 lowRiskLocations:
-- ''
+- SE
 mediumRiskLocations:
 - KE
 periodEndInput: 06:00:00
 periodStartInput: 00:00:00
-securityViewerThreshold: '0.4'
-signInRiskThreshold: '0.5'
-userIdentityWeight: '0.5'
+privilegedRoles:
+- Administrator
+- Policy Administrator
+- Approver
+resources:
+  logging:
+    adminResource: true
+    allowedRoles:
+    - Administrator
+    - Security Viewer
+    description: Logging and monitoring (the audit log)
+    minTrustScore: 0.6
+    path: /logging
+    writeRoles: []
+  pam_approval:
+    adminResource: false
+    allowedRoles:
+    - Approver
+    description: Approve privileged access (PAM) requests
+    minTrustScore: 0.75
+    path: /testing
+    writeRoles:
+    - Approver
+  policy_configuration:
+    adminResource: true
+    allowedRoles:
+    - Administrator
+    - Policy Administrator
+    description: Change the security policies
+    minTrustScore: 0.6
+    path: /configurePolicies
+    writeRoles:
+    - Policy Administrator
+  resource_1:
+    adminResource: false
+    allowedRoles:
+    - Researcher
+    - Administrator
+    description: Transaction data (our research database)
+    minTrustScore: 0.6
+    path: /resource-1
+    writeRoles: []
+  resource_2:
+    adminResource: false
+    allowedRoles:
+    - Administrator
+    description: Access tokens (sensitive)
+    minTrustScore: 0.75
+    path: /resource-2
+    writeRoles: []
+signInSuccessThreshold: '0.5'
+trustWeights:
+  accessFrequency: 0.15
+  accessTime: 0.1
+  accountAge: 0.05
+  device: 0.2
+  identityStrength: 0.15
+  location: 0.15
+  loginHistory: 0.2
