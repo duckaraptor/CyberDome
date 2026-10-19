@@ -1,7 +1,17 @@
 venv/
+.venv/
 /build
 /dist
 *.pyc
-* ~
+*~
 *.swp
 __pycache__
+.DS_Store
+.env
+
+# Runtime data written by the app and engines
+/data/
+web/instance/
+
+
+/notes/

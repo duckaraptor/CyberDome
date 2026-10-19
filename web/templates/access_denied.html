@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ status }} {{ title }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/index.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>{{ status }} {{ title }}</h1>
+        <p>{{ reason }}</p>
+        {% if resource %}<p><small>Resource: {{ resource }}</small></p>{% endif %}
+        {% if status == 401 %}
+        <a href="/logout" class="btn-authenticate">Log in again</a>
+        {% else %}
+        <a href="/home" class="btn-authenticate">Back to home</a>
+        {% endif %}
+    </div>
+</body>
+</html>
