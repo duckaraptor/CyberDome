@@ -7,5 +7,6 @@ Code shared by the decision engines and the Web UI:
 - trust_algorithm: calculates a user's trust score
 - policy: the Policy Engine's rules, which turn a trust score into allow or deny
 - networking: the peer-to-peer nodes (Access Proxy, Trust Engine, Policy Engine, Web UI)
+- risk: the Task 2 adaptive risk model (risk features, risk score with memory, levels, step-up)
 
 '''

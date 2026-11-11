@@ -2,6 +2,40 @@
 
 This file records the changes we make to CyberDome, newest first. For each fix we write what we saw, what was wrong and how we fixed it. Runtime-generated data is listed separately from intentional source and configuration changes.
 
+## 2026-11-09
+
+### Added: the adaptive risk model (Task 2, step 1)
+
+Branch: `feat-risk-model`. The model and the reasons behind it are in `docs/risk-model.md`.
+
+This step builds and tests the risk model on its own. The engines don't use it yet: `riskMode` is `static`, so CyberDome still decides exactly like Task 1. Step 2 connects it.
+
+**What we saw:** Task 2 asks for a risk score that changes during a session, with several risk levels. Our Task 1 trust score has no memory (each request is scored alone) and only leads to allow or deny. It also can't tell whether MFA was used in this login, only whether it is set up on the account.
+
+**What we changed:**
+
+- New package `cyberdome/risk/`:
+  - `defaults.py`: every setting with a default. Missing or wrong values in `policyConfiguration.yml` fall back to the default, and thresholds out of order are refused.
+  - `features.py`: 9 features (access frequency, resource-access sequence, session duration, authentication failures, time of day, device familiarity, network or context change, identity assurance, reaction to MFA challenges). Each gives a score from 0 to 1 and a reason.
+  - `model.py`: the event risk (weighted mean plus floors), the session risk with memory (`R_t = max(r_t, R_prev * 0.5 ^ (minutes / 10))`), the four levels, the admin step up, step-up checks from the token's `auth_time` and `acr`, recovery, and learning each user's usual behaviour.
+  - `signals.py`: counts failed logins (`data/auth_data.json`) and role-table denials (the audit log).
+  - `state.py`: saves session states and user profiles in `data/` under a lock, logs risk events, removes old ones, and ends idle sessions.
+- `policyConfiguration.yml`: new `riskMode: static` and a `riskModel` section with all settings. The existing keys are unchanged.
+- `cyberdome/data_paths.py`: the three new data files.
+- New `tests/test_risk.py`: 46 tests. All 46 pass, and the 65 Task 1 unit tests still pass.
+
+**Weights:** the five factors of the ARB-ZTA paper keep the paper's order and ratios, scaled to 0.60 together (access frequency and authentication failures 0.15, session duration 0.12, time of day and MFA reaction 0.09). The four other features share 0.40. The experiments will tune them.
+
+**A problem we found while testing, and the fix (floors):** with a weighted mean, one feature can only add its own weight. When Bob tried the audit log page and was denied twice, the sequence feature was at 1.0 but the risk was only 0.16 (LOW). A burst of 40 requests in 5 minutes gave 0.19 (LOW). Those are the privilege-abuse and high-frequency scenarios of the task. We added **floors**: when one strong feature reaches 1.0, the risk is at least MEDIUM (sequence, device changed inside the session, frequency) or HIGH (5 failed logins, 3 failed step-ups, a high-risk country). We didn't raise the weights instead, because that would push normal users toward MFA prompts too. `docs/risk-model.md` explains the choice.
+
+**Example (from the tests):**
+
+| Request | Before floors | With floors |
+| --- | --- | --- |
+| Bob, denied twice, then tries the audit log page | 0.16 LOW | 0.30 MEDIUM |
+| Bob, 40 requests in 5 minutes | 0.19 LOW | 0.30 MEDIUM |
+| Bob, normal read of Resource 1 | 0.04 LOW | 0.04 LOW |
+
 ## 2026-10-20
 
 ### Changed: the trust factors have three named groups

@@ -59,6 +59,81 @@ resources:
     minTrustScore: 0.75
     path: /resource-2
     writeRoles: []
+riskMode: static
+riskModel:
+  accessFrequency:
+    capRatio: 4
+    minBaseline: 10
+    windowMinutes: 5
+  adminLevelBump: 1
+  authFailures:
+    cap: 5
+    windowMinutes: 10
+  deviceFamiliarity:
+    changedInSession: 1.0
+    newDevice: 0.6
+  floors:
+  - atLeast: 1.0
+    feature: authFailures
+    level: HIGH
+  - atLeast: 1.0
+    feature: mfaReaction
+    level: HIGH
+  - atLeast: 1.0
+    feature: networkChange
+    level: HIGH
+  - atLeast: 1.0
+    feature: resourceSequence
+    level: MEDIUM
+  - atLeast: 1.0
+    feature: deviceFamiliarity
+    level: MEDIUM
+  - atLeast: 1.0
+    feature: accessFrequency
+    level: MEDIUM
+  halfLifeMinutes: 10
+  identityAssurance:
+    passwordOnly: 0.5
+    unverifiedEmail: 0.2
+  memory: true
+  mfaAcrValues:
+  - '2'
+  mfaReaction:
+    cap: 3
+  minHistory: 20
+  networkChange:
+    changed: 0.7
+    highRiskLocation: 1.0
+    mediumRiskLocation: 0.5
+  resourceSequence:
+    adminJump: 0.3
+    denialWindowMinutes: 10
+    perDenial: 0.25
+    rareAdminShare: 0.1
+    smoothing: 1
+  retentionDays: 30
+  sessionDuration:
+    capMultiple: 4
+    usualMinutes: 60
+  stepUpTimeoutMinutes: 5
+  thresholds:
+    CRITICAL: 0.8
+    HIGH: 0.55
+    MEDIUM: 0.3
+  timeOfDay:
+    bandHours: 3
+    nightScore: 0.7
+    normalShare: 0.05
+  weights:
+    accessFrequency: 0.15
+    authFailures: 0.15
+    deviceFamiliarity: 0.1
+    identityAssurance: 0.08
+    mfaReaction: 0.09
+    networkChange: 0.1
+    resourceSequence: 0.12
+    sessionDuration: 0.12
+    timeOfDay: 0.09
 signInSuccessThreshold: '0.5'
 trustWeights:
   accessFrequency: 0.15
