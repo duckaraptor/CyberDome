@@ -11,6 +11,7 @@ For every request to a protected page, the Policy Engine gets:
 - **the request record** from the Web UI (see "Request Record" in `how-it-works.md`): user, roles from the token, resource, action, authentication status, location, device ID, `new_device`, time
 - **the trust score and its breakdown** from the Trust Engine (see `trust-model.md`)
 - **the user's sign-in success rate**: the share of successful logins over their last 10 attempts
+- in adaptive mode (Task 2), **the session's risk** from the Risk Engine instead of the trust score (see "Adaptive mode" below and `risk-model.md`)
 
 ## The 6 policies
 
@@ -51,6 +52,66 @@ The task says "Policies must consider both identity/role and request context". W
 The factor groups (behaviour, context, identity) are explained in "Three groups of factors" in `trust-model.md`. The behaviour factors sit in the request context column, because they describe what is happening around this request right now: which device sends it, how many requests came just before it, and whether the recent logins worked. The identity factors describe the account itself.
 
 In the first version of the policies, P2 only looked at the resource, and P3 never looked at the role. "Why P2 checks the action" and "Why P3 depends on the role" below explain how we changed that.
+
+## Adaptive mode (Task 2)
+
+`riskMode` in `policyConfiguration.yml` chooses the set of policies:
+
+| `riskMode` | System | Node 2 sends | Policies, in order |
+| --- | --- | --- | --- |
+| `static` (default) | A, Task 1 | the trust score | P1, P2, P3, P4, P5, then P6 |
+| `adaptive` | B, Task 2 | the session's risk | P1, P2, R1, then P6 |
+
+Any value other than `adaptive` (also a typo) runs the static policies, so a mistake in the file can't switch the checks off. Both modes use the same nodes, files and pages. Only the decision logic changes, so the experiments compare the logic and nothing else.
+
+| Policy | Static | Adaptive | Why |
+| --- | --- | --- | --- |
+| P1 Invalid authentication | yes | yes | A hard rule. A low risk can't make an invalid login valid |
+| P2 Unauthorized resource | yes | yes | A hard rule. Risk only makes access harder, it never gives a role more |
+| P3 Risky context | yes | no | Location, time of day and failed logins are features of the risk score (F7, F5, F4), with a weight, not a yes or no rule |
+| P4 Admin resource | yes | no | Replaced by the "one level up" rule for admin resources in R1 |
+| P5 Low trust | yes | no | Replaced by R1 |
+| **R1 Adaptive risk** | no | yes | Chooses the response from the risk level (below) |
+| P6 Permitted access | yes | yes | The risk is LOW, or a step-up passed in this session covers the level |
+
+### R1 Adaptive risk
+
+R1 takes the session's risk level from the Risk Engine. For an admin resource (`adminResource: true`), it moves the level up by `riskModel.adminLevelBump` (1) first. The result is the **response level**:
+
+| Response level | Decision | Outcome in the log | What the user gets (step 2 / step 3) |
+| --- | --- | --- | --- |
+| LOW | Allow (P6) | `ALLOW` | The page |
+| MEDIUM | Step-up, `otp` | `STEP_UP_REQUIRED` | Step 2: a page that says an OTP is needed. Step 3: Keycloak asks for a one-time code |
+| HIGH | Step-up, `full` | `STEP_UP_REQUIRED` | Step 2: a page that says a full login is needed. Step 3: Keycloak asks for the password and the OTP again |
+| CRITICAL | Deny | `RISK_ALERT` | `403`. Step 3 also ends the session at Keycloak |
+
+If the Risk Engine sent no risk (for example the request has no session ID), R1 denies with the reason (`DENY`). That is fail closed, like P5 without a trust score.
+
+Examples:
+
+```text
+ALLOW    P6  Role Researcher may access resource_1. Session risk 0.040 (LOW). Raised by: ..., so no extra check is needed
+STEP_UP  R1  Session risk 0.320 (MEDIUM). Raised by: deviceFamiliarity 1 (device changed during the session), ... The response level is MEDIUM, so a one-time code (OTP) is needed
+STEP_UP  R1  Session risk 0.040 (LOW). ... The response level is MEDIUM (one level up, because this is an admin resource), so a one-time code (OTP) is needed
+DENY     R1  No risk score for this request (Risk evaluation failed: ValueError: The request has no session ID, so its session risk cannot be kept)
+```
+
+### A passed step-up covers its level for the session
+
+When a step-up is passed, the session remembers the response level it was asked for (`verified_level`). Later requests at that level or lower are allowed without a new prompt, for the rest of the session. A higher level asks again, and CRITICAL is never covered.
+
+Example: Bob's laptop changes during the session, the risk goes to MEDIUM, and he passes the OTP. The next MEDIUM requests are allowed. If the risk goes to HIGH, he has to log in fully again.
+
+**Why:** the task asks for "allow with additional verification" at MEDIUM, not a prompt on every click. Asking again at the same level would add MFA prompts without new information, which is the security fatigue our research question is about. The other choice was to clear the cover when the risk goes back to LOW, so the next rise asks again. We didn't pick it, because then an administrator would get an OTP on almost every admin page (admin pages are always at least MEDIUM, see below). The experiments count the prompts, so we can check this choice.
+
+**What this means for admin pages:** an admin resource is always at least MEDIUM, so an administrator gets one OTP the first time they open an admin page in a session. After that, the session is covered at MEDIUM. This is the "MFA for admins" idea from "Limits and future work" below, now based on risk.
+
+### What the Policy Engine does after deciding
+
+In adaptive mode, after logging the decision, the Policy Engine tells the Risk Engine's state (`cyberdome/risk/engine.py`, `record_decision()`):
+
+- **a step-up** marks the session "step-up waiting" with the time. The next requests show whether it was passed (newer `auth_time` and MFA in `acr`) or not within 5 minutes (F9 goes up). Asking again for the same step-up, for example by reloading the page, keeps the first time, so reloading can't stop the timeout.
+- **an allow at LOW risk** adds the request to the user's usual behaviour (the profile). Nothing else does, so an attacker's requests can't become the user's "usual" behaviour.
 
 ## Settings
 
@@ -166,7 +227,7 @@ The trust score and P3 use the user's recent logins from Keycloak's events. If t
 
 ## Limits and future work
 
-- **Step-up MFA.** For medium risk, a real system would ask for a second factor (for example an OTP in Keycloak) instead of denying. This is the adaptive authentication our charter is about. It would fit between P4 and P5.
+- **Step-up MFA.** For medium risk, a real system would ask for a second factor (for example an OTP in Keycloak) instead of denying. This is the adaptive authentication our charter is about. Task 2 adds it in adaptive mode (R1, see "Adaptive mode" above). In step 2 the step-up is only decided and logged. Step 3 adds the Keycloak redirect.
 - **MFA for admins.** Requiring MFA for admin resources would be stronger than a minimum score. Our demo users don't have MFA set up.
 - **The device rule is weak.** A device becomes known after one allowed request. A real system would register devices, for example through device management (MDM).
 - **Invalid tokens never reach the Policy Engine.** The Web UI refuses them with `401`, because it can't build a request record without a valid token. The audit log (section 3.5) records these as `AUTHENTICATION_FAILURE` from the Web UI.

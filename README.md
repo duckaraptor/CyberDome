@@ -35,7 +35,7 @@ More pictures, step by step, are in [docs/diagrams.md](docs/diagrams.md).
 | [Trust model](docs/trust-model.md) | The 7 trust factors, their weights and why, the factors we removed, the bugs we fixed |
 | [Policies](docs/policies.md) | The policies P1 to P6, the settings, why they look like this, and which policy decides each scenario |
 | [Audit log](docs/audit-log.md) | What gets logged, what an entry looks like, the task's data model, and why the log is append-only |
-| [Risk model](docs/risk-model.md) | Task 2: the 9 risk features, the risk score with memory, the levels, floors, step-up and recovery. Built and tested, not yet used by the engines |
+| [Risk model](docs/risk-model.md) | Task 2: the 9 risk features, the risk score with memory, the levels, floors, step-up and recovery, and how the engines use it with `riskMode: adaptive` |
 | [Changelog](docs/changelog.md) | Every change, newest first, with what we saw and what we changed |
 
 ## Demo users and roles
@@ -122,7 +122,7 @@ The unit tests need nothing running:
 
 ```bash
 python3 tests/test_trust.py      # the 7 trust factors, the weights and the bug fixes
-python3 tests/test_policies.py   # the policies P1 to P6 and the five scenarios of the task
+python3 tests/test_policies.py   # the policies P1 to P6, the five scenarios of the task, and R1 in adaptive mode
 python3 tests/test_audit.py      # the audit log and the append-only files
 python3 tests/test_risk.py       # Task 2: the risk features, memory, levels, step-up and recovery
 ```

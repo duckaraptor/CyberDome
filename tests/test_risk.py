@@ -20,7 +20,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO_ROOT)
 
 from cyberdome.risk import features as f  # noqa: E402  (needs the path above)
-from cyberdome.risk import model  # noqa: E402
+from cyberdome.risk import engine, model  # noqa: E402
 from cyberdome.risk.defaults import DEFAULT_RISK_MODEL, FEATURES, risk_settings  # noqa: E402
 from cyberdome.risk.signals import count_auth_failures, count_recent_denials  # noqa: E402
 from cyberdome.risk.state import RiskStore, end_idle_sessions  # noqa: E402
@@ -349,7 +349,7 @@ def test_passed_step_up_resets_the_risk_and_accepts_the_new_device():
     profile = bob_profile()
     _, session = evaluate(request(1), profile=profile)
     odd, session = evaluate(request(2, device_id='other', new_device=True, source_ip='10.0.0.9'), session, profile)
-    session = model.request_step_up(session, 'otp', at(2))
+    session = model.request_step_up(session, 'otp', 'MEDIUM', at(2))
     stepped_up = (LOGIN + timedelta(minutes=3)).timestamp()
     after, session = evaluate(request(4, device_id='other', new_device=True, source_ip='10.0.0.9',
                                       auth_time=stepped_up, acr='2'), session, profile)
@@ -362,21 +362,21 @@ def test_passed_step_up_resets_the_risk_and_accepts_the_new_device():
 
 def test_step_up_without_mfa_is_not_passed():
     _, session = evaluate(request(1))
-    session = model.request_step_up(session, 'otp', at(1))
+    session = model.request_step_up(session, 'otp', 'MEDIUM', at(1))
     result, session = evaluate(request(2, auth_time=(LOGIN + timedelta(minutes=2)).timestamp(), acr='1'), session)
     assert result['step_up'] is None and session['step_up'] is not None
 
 
 def test_old_login_does_not_pass_a_step_up():
     _, session = evaluate(request(1))
-    session = model.request_step_up(session, 'otp', at(1))
+    session = model.request_step_up(session, 'otp', 'MEDIUM', at(1))
     result, _ = evaluate(request(2, acr='2'), session)  # auth_time is still the 09:00 login
     assert result['step_up'] is None
 
 
 def test_step_up_not_passed_in_time_counts_as_failed():
     _, session = evaluate(request(1))
-    session = model.request_step_up(session, 'otp', at(1))
+    session = model.request_step_up(session, 'otp', 'MEDIUM', at(1))
     result, session = evaluate(request(1 + SETTINGS['stepUpTimeoutMinutes']), session)
     assert result['step_up'] == 'failed'
     assert session['failed_step_ups'] == 1
@@ -387,9 +387,30 @@ def test_step_up_without_mfa_values_needs_only_a_new_login():
     # The fallback if OTP doesn't work: mfaAcrValues empty, a password login again is enough
     config = dict(CONFIG, riskModel=dict(CONFIG['riskModel'], mfaAcrValues=[]))
     _, session = evaluate(request(1), config=config)
-    session = model.request_step_up(session, 'full', at(1))
+    session = model.request_step_up(session, 'full', 'HIGH', at(1))
     result, _ = evaluate(request(2, auth_time=(LOGIN + timedelta(minutes=2)).timestamp()), session, config=config)
     assert result['step_up'] == 'passed'
+
+
+def test_asking_again_keeps_the_first_step_up_time():
+    # Reloading the page while an OTP is waiting must not restart the timeout
+    _, session = evaluate(request(1))
+    session = model.request_step_up(session, 'otp', 'MEDIUM', at(1))
+    again = model.request_step_up(session, 'otp', 'MEDIUM', at(3))
+    assert again['step_up']['requested_at'] == at(1)
+    stricter = model.request_step_up(session, 'full', 'HIGH', at(3))
+    assert stricter['step_up'] == {'kind': 'full', 'level': 'HIGH', 'requested_at': at(3)}
+
+
+def test_passed_step_up_covers_its_level_for_the_session():
+    _, session = evaluate(request(1))
+    session = model.request_step_up(session, 'otp', 'MEDIUM', at(1))
+    result, session = evaluate(request(2, auth_time=(LOGIN + timedelta(minutes=2)).timestamp(), acr='2'), session)
+    assert result['verified_level'] == session['verified_level'] == 'MEDIUM'
+    assert model.is_covered('LOW', 'MEDIUM') and model.is_covered('MEDIUM', 'MEDIUM')
+    assert not model.is_covered('HIGH', 'MEDIUM')
+    assert not model.is_covered('CRITICAL', 'CRITICAL')
+    assert not model.is_covered('MEDIUM', None)
 
 
 # --- Learning ------------------------------------------------------------------------------
@@ -496,6 +517,58 @@ def test_old_risk_events_are_removed():
         assert store.prune_events(30, at(0)) == 1
         with open(store.events_file) as file:
             assert [json.loads(line)['risk'] for line in file] == [0.2]
+
+
+# --- The Risk Engine (engine.py): the model with the saved state ----------------------------
+
+def test_engine_keeps_the_session_risk_between_requests():
+    with tempfile.TemporaryDirectory() as folder:
+        store = store_in(folder)
+        first = engine.assess(request(1), CONFIG, store, signals=SIGNALS)
+        odd = engine.assess(request(2, device_id='other', new_device=True), CONFIG, store, signals=SIGNALS)
+        later = engine.assess(request(3), CONFIG, store, signals=SIGNALS)
+        assert first['level'] == 'LOW' and odd['level'] == 'MEDIUM'
+        assert later['carried_risk'] > later['event_risk']   # the memory of the device change
+        assert later['session_id'] == 'session-1' and later['signals'] == SIGNALS
+        events = [json.loads(line) for line in open(store.events_file)]
+        assert [event['level'] for event in events] == ['LOW', 'MEDIUM', later['level']]
+        assert set(events[0]['features']) == set(FEATURES)
+
+
+def test_engine_needs_a_session_id():
+    with tempfile.TemporaryDirectory() as folder:
+        try:
+            engine.assess(request(1, session_id=None), CONFIG, store_in(folder), signals=SIGNALS)
+        except ValueError as e:
+            assert 'session ID' in str(e)
+        else:
+            raise AssertionError('a request without a session ID was scored')
+
+
+def test_engine_refuses_a_session_of_another_user():
+    with tempfile.TemporaryDirectory() as folder:
+        store = store_in(folder)
+        engine.assess(request(1), CONFIG, store, signals=SIGNALS)
+        try:
+            engine.assess(request(2, user_id='mallory-id'), CONFIG, store, signals=SIGNALS)
+        except ValueError as e:
+            assert 'another user' in str(e)
+        else:
+            raise AssertionError('a request was scored in another user\'s session')
+
+
+def test_engine_remembers_a_step_up_and_learns_only_at_low():
+    with tempfile.TemporaryDirectory() as folder:
+        store = store_in(folder)
+        low = engine.assess(request(1), CONFIG, store, signals=SIGNALS)
+        engine.record_decision(request(1), low, {'outcome': 'ALLOW'}, store)
+        medium = engine.assess(request(2, device_id='other', new_device=True), CONFIG, store, signals=SIGNALS)
+        engine.record_decision(request(2), medium, {'outcome': 'ALLOW'}, store)   # allowed, but not at LOW
+        engine.record_decision(request(2), medium, {'outcome': 'STEP_UP_REQUIRED', 'step_up': 'otp',
+                                                    'response_level': 'MEDIUM'}, store)
+        with store.locked() as (sessions, profiles):
+            assert profiles['bob-id']['requests'] == 1
+            assert sessions['session-1']['step_up'] == {'kind': 'otp', 'level': 'MEDIUM', 'requested_at': at(2)}
 
 
 if __name__ == '__main__':

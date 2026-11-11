@@ -2,6 +2,47 @@
 
 This file records the changes we make to CyberDome, newest first. For each fix we write what we saw, what was wrong and how we fixed it. Runtime-generated data is listed separately from intentional source and configuration changes.
 
+## 2026-11-11
+
+### Added: adaptive mode in the engines (Task 2, step 2)
+
+Branch: `feat-adaptive-policy`. The details are in `docs/policies.md` ("Adaptive mode"), `docs/risk-model.md` ("How the engines use the model") and `docs/audit-log.md` ("Risk fields").
+
+**What we saw:** after step 1 the risk model was built and tested, but nothing called it. Every request still went through the trust score and P1 to P6.
+
+**What we changed:**
+
+- `riskMode` now works. `static` (the default) runs exactly the Task 1 path. `adaptive` runs the risk path. Any other value runs the static path, so a typo can't switch the checks off.
+- Node 2 works as the **Risk Engine** in adaptive mode (`cyberdome/networking.py`, new `cyberdome/risk/engine.py`). It counts the signals, runs the model under the state lock, saves the session and logs a risk event. If it can't score (for example no session ID), it sends the error, and the Policy Engine denies.
+- New policy **R1 Adaptive risk** (`cyberdome/policy.py`). Adaptive mode runs P1, P2, R1, P6. R1 moves admin resources one level up, then: LOW allow, MEDIUM OTP step-up, HIGH full step-up, CRITICAL deny with an alert.
+- Two new audit outcomes, `STEP_UP_REQUIRED` and `RISK_ALERT`, and the decision value `STEP_UP` (`cyberdome/audit.py`). Adaptive entries carry the risk fields (`risk_score`, `risk_level`, `response_level`, `step_up`, `risk_features`, ...). Static entries are unchanged.
+- After deciding, the Policy Engine marks a step-up as waiting, and lets the profile learn only from requests allowed at LOW risk (`engine.record_decision()`).
+- The request record gets `session_id`, `auth_time` and `acr` from the checked token (`web/request_context.py`).
+- The Web UI shows "Extra verification needed" for a step-up, and adds the headers `X-CyberDome-Risk` and `X-CyberDome-Step-Up` (`web/authz.py`). The `/logging` page shows the risk and the 9 features, with colours for the new outcomes.
+- Model changes (`cyberdome/risk/model.py`):
+  - `request_step_up()` now also stores the level the step-up is for.
+  - Asking again for the same step-up keeps the first time, so reloading the page doesn't restart the 5-minute timeout.
+  - A passed step-up sets `verified_level`, and R1 doesn't ask again at that level or lower in the same session.
+
+**Before and after (adaptive mode, same requests):**
+
+| Request | Static (Task 1) | Adaptive |
+| --- | --- | --- |
+| Bob reads Resource 1, normal | ALLOW, P6 | ALLOW, P6, risk LOW |
+| Bob's device changes during the session | ALLOW, P6 (trust still high enough) | STEP_UP_REQUIRED, R1, `otp` (risk MEDIUM, device floor) |
+| An administrator opens the audit log page, low risk | ALLOW, P6 | STEP_UP_REQUIRED, R1, `otp` (admin page: one level up). Allowed after the first OTP of the session |
+| A request without a session ID | ALLOW, P6 | DENY, R1 (no risk score, fail closed) |
+
+**Choices we made, and why:**
+
+- **A passed step-up covers its level for the rest of the session.** Without this, an administrator would get an OTP on every admin page, because admin pages are always at least MEDIUM. That would be many prompts without new information (security fatigue). A higher level still asks again, and CRITICAL is never covered. `docs/policies.md` has the reasons and the alternative we didn't pick.
+- **Learning only at LOW.** A request allowed because a step-up covered it (MEDIUM or higher) doesn't teach the profile. So an attacker who gets one OTP right still can't make their behaviour "usual".
+- **The risk is shown with 3 decimals** in reasons and on the `/logging` page. With 2 decimals, a risk of 0.2986 showed as "0.30 (LOW)", which looked wrong next to the MEDIUM threshold of 0.30.
+
+**Not in this step:** the step-up itself (the Keycloak redirect for an OTP or a full login), the read-only mode at HIGH, and ending the session at CRITICAL. Those are step 3. Until then, a step-up in adaptive mode can't be passed in the browser, and after 5 minutes it counts as failed (F9).
+
+**Tests:** 128 unit tests pass (21 trust, 39 policies, 16 audit, 52 risk). New: 10 for R1 and the mode switch, 1 for the `STEP_UP` decision, 6 for step-ups and the Risk Engine. We also ran node 2 and node 3's message handlers in both modes with temporary files: adaptive mode gave the levels and step-ups in the audit log, static mode gave Task 1 entries without risk fields. We haven't run it against the real Keycloak yet, so we haven't checked that Keycloak's answer about the token has `sid`, `auth_time` and `acr`. I think Keycloak 26 includes them, but we have to check that before step 3.
+
 ## 2026-11-09
 
 ### Added: the adaptive risk model (Task 2, step 1)

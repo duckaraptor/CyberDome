@@ -1,6 +1,7 @@
 '''
 
-Tests for the Policy Engine's policies P1 to P6 (assignment section 3.4, docs/policies.md).
+Tests for the Policy Engine's policies P1 to P6 (assignment section 3.4, docs/policies.md),
+and for R1 in adaptive mode (Task 2).
 
 They use made-up requests and a made-up configuration, so they don't need Keycloak,
 the engines or the files in data/. Each test is a function named test_..., so pytest
@@ -213,6 +214,87 @@ def test_scenario_5_admin_on_admin_resource():
     assert_decision(run(request(roles=['Administrator'], resource='policy_configuration')), 'ALLOW', 'P6', 'ALLOW')
     assert_decision(run(request(roles=['Policy Administrator'], resource='policy_configuration', action='write')),
                     'ALLOW', 'P6', 'ALLOW')
+
+
+# --- Adaptive mode (riskMode: adaptive, Task 2) -------------------------------------------
+#
+# P1 and P2 stay hard rules. P3, P4 and P5 are replaced by R1, which chooses the response
+# from the session's risk level. Admin resources move one level up.
+
+ADAPTIVE = dict(CONFIG, riskMode='adaptive')
+
+
+def risk(level='LOW', score=None, verified_level=None):
+    scores = {'LOW': 0.05, 'MEDIUM': 0.35, 'HIGH': 0.6, 'CRITICAL': 0.9}
+    return {'risk': scores[level] if score is None else score, 'level': level, 'verified_level': verified_level,
+            'top_features': 'deviceFamiliarity 1 (device changed during the session)', 'floor': None}
+
+
+def run_adaptive(access_request, risk_result, sign_in_success_rate=1.0, risk_error=None, config=ADAPTIVE):
+    return decide(access_request, None, None, sign_in_success_rate, None, config, risk=risk_result, risk_error=risk_error)
+
+
+def test_unknown_mode_runs_the_static_policies():
+    config = dict(CONFIG, riskMode='adaptiv')
+    assert_decision(decide(request(), 0.1, None, 1.0, None, config), 'DENY', 'P5', 'DENY')
+
+
+def test_adaptive_low_risk_is_allowed():
+    result = run_adaptive(request(), risk('LOW'))
+    assert_decision(result, 'ALLOW', 'P6', 'ALLOW')
+    assert result['response_level'] == 'LOW' and 'Session risk 0.050 (LOW)' in result['reason']
+
+
+def test_adaptive_medium_risk_asks_for_an_otp():
+    result = run_adaptive(request(), risk('MEDIUM'))
+    assert_decision(result, 'STEP_UP', 'R1', 'STEP_UP_REQUIRED')
+    assert result['step_up'] == 'otp' and result['access_decision'] == 0
+    assert 'deviceFamiliarity' in result['reason']
+
+
+def test_adaptive_high_risk_asks_for_a_full_login():
+    result = run_adaptive(request(), risk('HIGH'))
+    assert_decision(result, 'STEP_UP', 'R1', 'STEP_UP_REQUIRED')
+    assert result['step_up'] == 'full'
+
+
+def test_adaptive_critical_risk_is_denied_with_an_alert():
+    assert_decision(run_adaptive(request(), risk('CRITICAL')), 'DENY', 'R1', 'RISK_ALERT')
+
+
+def test_adaptive_admin_resource_is_one_level_stricter():
+    admin = request(roles=['Administrator'], resource='policy_configuration')
+    result = run_adaptive(admin, risk('LOW'))
+    assert_decision(result, 'STEP_UP', 'R1', 'STEP_UP_REQUIRED')
+    assert result['step_up'] == 'otp' and 'admin resource' in result['reason']
+    assert_decision(run_adaptive(admin, risk('HIGH')), 'DENY', 'R1', 'RISK_ALERT')
+
+
+def test_adaptive_passed_step_up_covers_its_level():
+    assert_decision(run_adaptive(request(), risk('MEDIUM', verified_level='MEDIUM')), 'ALLOW', 'P6', 'ALLOW')
+    assert_decision(run_adaptive(request(), risk('HIGH', verified_level='MEDIUM')), 'STEP_UP', 'R1', 'STEP_UP_REQUIRED')
+    assert_decision(run_adaptive(request(), risk('CRITICAL', verified_level='HIGH')), 'DENY', 'R1', 'RISK_ALERT')
+
+
+def test_adaptive_no_risk_score_is_denied():
+    result = run_adaptive(request(), None, risk_error='Risk evaluation failed: no session ID')
+    assert_decision(result, 'DENY', 'R1', 'DENY')
+    assert 'no session ID' in result['reason']
+
+
+def test_adaptive_keeps_the_hard_rules():
+    assert_decision(run_adaptive(request(resource='resource_2'), risk('LOW')), 'DENY', 'P2', 'POLICY_VIOLATION')
+    assert_decision(run_adaptive(request(authentication_status='unauthenticated'), risk('LOW')),
+                    'DENY', 'P1', 'AUTHENTICATION_FAILURE')
+    assert_decision(run_adaptive(request(), risk('LOW'), sign_in_success_rate=None), 'DENY', 'P1', 'AUTHENTICATION_FAILURE')
+
+
+def test_adaptive_context_rules_are_features_not_rules():
+    # P3 would deny a researcher's request from a medium-risk location at night with weak logins.
+    # In adaptive mode those are features of the risk score, and R1 decides from the level.
+    night = request(location='KE', access_request_time='2026-10-14 03:00:00')
+    assert run(night, sign_in_success_rate=0.2)['policy_id'] == 'P3'
+    assert_decision(run_adaptive(night, risk('LOW'), sign_in_success_rate=0.2), 'ALLOW', 'P6', 'ALLOW')
 
 
 if __name__ == '__main__':

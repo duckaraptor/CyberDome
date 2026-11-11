@@ -10,21 +10,25 @@ Every decision, wherever it is made:
 
 | Decided by | Event | Outcome |
 | --- | --- | --- |
-| Policy Engine | Every decision on a protected page (policies P1 to P6, see `policies.md`) | `ALLOW`, `DENY`, `AUTHENTICATION_FAILURE` or `POLICY_VIOLATION`, as the policy decided |
+| Policy Engine | Every decision on a protected page (policies P1 to P6, and R1 in adaptive mode, see `policies.md`) | `ALLOW`, `DENY`, `AUTHENTICATION_FAILURE` or `POLICY_VIOLATION`, as the policy decided. In adaptive mode also `STEP_UP_REQUIRED` and `RISK_ALERT` |
 | Web UI | Someone who isn't logged in opens a protected page, and is sent to the login page | `AUTHENTICATION_FAILURE` |
 | Web UI | The login token is invalid, expired or revoked (`401`) | `AUTHENTICATION_FAILURE` |
 | Web UI | Keycloak can't be reached to check the token (`503`) | `DENY` |
 | Web UI | The decision engines are down (`503`) or don't answer in time (`504`) | `DENY` |
 | Keycloak | A failed login, for example a wrong password (Keycloak's `LOGIN_ERROR` events) | `AUTHENTICATION_FAILURE` |
 
-The four outcomes are the categories the task asks for:
+The first four outcomes are the categories Task 1 asks for. Task 2 (adaptive mode) adds two:
 
 | Outcome | Meaning |
 | --- | --- |
 | `ALLOW` | Access was given (policy P6) |
-| `DENY` | Access was refused because of low trust or risky context (P3, P4, P5), or because the request couldn't be checked |
+| `DENY` | Access was refused because of low trust or risky context (P3, P4, P5), or because the request couldn't be checked (also R1 without a risk score) |
 | `AUTHENTICATION_FAILURE` | The user couldn't prove who they are: not logged in, a bad token, a failed login, or P1 |
 | `POLICY_VIOLATION` | The user is known, but their role may not do this (P2) |
+| `STEP_UP_REQUIRED` | Adaptive mode: the session's risk is MEDIUM or HIGH, so access waits for an OTP (`step_up: otp`) or a full login (`step_up: full`) (R1) |
+| `RISK_ALERT` | Adaptive mode: the risk is CRITICAL, so access is denied and the entry is an alert (R1) |
+
+**Why two new outcomes and not `DENY`:** a step-up isn't a refusal. The user can still get in, after proving more. Counting step-ups apart from denials gives us the number of MFA prompts, which the experiments and our research question need. `RISK_ALERT` is apart from `DENY` so the alerts are easy to find with the outcome filter on the `/logging` page, and so step 4 can act on them.
 
 ## What an entry looks like
 
@@ -59,6 +63,24 @@ One JSON object per line. An example (shown on several lines here):
 
 Fields that don't apply are `null`. For example, a visitor who isn't logged in has no `user`, `role` or `trust_score`.
 
+### Risk fields (adaptive mode)
+
+In adaptive mode, the Policy Engine's entries have no trust score (`trust_score` and `trust_factors` are `null`), and these fields instead:
+
+| Field | Meaning |
+| --- | --- |
+| `session_id` | The Keycloak session (`sid` from the token) |
+| `risk_score` | The session's risk `R_t`, between 0 and 1 |
+| `risk_level` | LOW, MEDIUM, HIGH or CRITICAL, from `risk_score` |
+| `response_level` | The level R1 acted on: `risk_level`, one level up for an admin resource |
+| `step_up` | `otp` or `full` for a step-up, otherwise `null` |
+| `event_risk` | The risk of this request alone (`r_t`) |
+| `carried_risk` | The session's earlier risk after the decay |
+| `risk_floor` | Which floor raised the risk, or `null` |
+| `risk_features` | All 9 features, each with score, weight and reason |
+
+Static mode adds none of these fields, so its entries stay exactly as in Task 1. The meaning of each value is in `risk-model.md`.
+
 ## The task's data model
 
 Section 4 of the task gives a minimum data model. Every audit entry has these fields with exactly these names:
@@ -71,8 +93,8 @@ Section 4 of the task gives a minimum data model. Every audit entry has these fi
 | `action` | `action` | `read` for GET, `write` for POST |
 | `device_id` | `device_id` | The `cyberdome_device_id` cookie |
 | `source_ip` | `source_ip` | The HTTP connection |
-| decision | `decision` | `ALLOW` or `DENY` |
-| trust score | `trust_score` | The Trust Engine's score for this request |
+| decision | `decision` | `ALLOW` or `DENY`. In adaptive mode also `STEP_UP` (for `STEP_UP_REQUIRED`) |
+| trust score | `trust_score` | The Trust Engine's score for this request. In adaptive mode `null`, and the risk is in `risk_score` |
 | reason | `reason` | The policy's reason, or the Web UI's or Keycloak's reason |
 
 The request record (`data/access_requests.jsonl`) keeps the repository's own names (`username`, `roles`), as the task allows ("adapting it to the repository's existing format"). The audit log uses the task's names, so each field of section 4 is easy to find.
@@ -104,7 +126,7 @@ The login page belongs to Keycloak, so CyberDome never sees a wrong password its
 
 ## The /logging page
 
-Only roles allowed the `logging` resource can open it (Administrator and Security Viewer), and the request goes through the engines like every other protected page. It shows the newest 200 entries, newest first, with filters for outcome and user.
+Only roles allowed the `logging` resource can open it (Administrator and Security Viewer), and the request goes through the engines like every other protected page. It shows the newest 200 entries, newest first, with filters for outcome and user. In adaptive mode, the score column shows the risk and its level, and opens to the response level and the 9 features.
 
 ## Files
 

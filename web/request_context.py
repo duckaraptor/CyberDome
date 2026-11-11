@@ -3,7 +3,7 @@
 Builds the access request record for a protected page, on the server.
 
 The record comes from things the server controls: the checked token (user, roles,
-authentication status), the page (resource, action), the HTTP connection (source IP
+authentication status, session, login time and level), the page (resource, action), the HTTP connection (source IP
 and its location), the device ID cookie and the browser's User-Agent header (device
 type, OS). Values sent by the browser in a request body are not used, because the
 user can change them.
@@ -143,4 +143,10 @@ def build_access_request(resource):
         'browser': user_agent,
         'device_type': device_type,
         'device_OS': device_os,
+        # For the adaptive risk model (Task 2): which Keycloak session the request belongs to,
+        # when the user last logged in, and how (acr). They come from Keycloak's answer about
+        # the token, so the browser can't change them.
+        'session_id': g.token_info.get('sid') or g.token_info.get('session_state'),
+        'auth_time': g.token_info.get('auth_time'),
+        'acr': g.token_info.get('acr'),
     }

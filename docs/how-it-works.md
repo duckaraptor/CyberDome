@@ -60,11 +60,11 @@ User -> Authentication -> Access Proxy -> Trust Engine -> Policy Engine -> Allow
 3. The Web UI builds the request record on the server (`web/request_context.py`, see Request Record below): user, roles, resource, action, time, authentication status, source IP and its location, device ID, and device type, OS and browser. It appends the record to `data/access_requests.jsonl` (one record per line) with a new `ID`.
 4. The Web UI's node 4 (`web/proxy_client.py`, one node shared by all requests on port `8004`) sends the record to the Access Proxy on port `8001`.
 5. The Access Proxy checks the record is complete (ID, user, resource, action, authentication status), stamps it as mediated, and forwards the whole record to the Trust Engine on port `8002`. An incomplete record is rejected with a reason.
-6. The Trust Engine scores this request and sends the record, the score and its breakdown to the Policy Engine on port `8003`. If scoring fails, it sends the error instead.
-7. The Policy Engine applies the policies P1 to P6 (see Policy Decision below), writes the decision to the audit log `data/audit.log` (with the request, trust score and breakdown, policy, outcome and reason, see Audit Log below), and only then sends it to node 4.
+6. The Trust Engine scores this request and sends the record, the score and its breakdown to the Policy Engine on port `8003`. If scoring fails, it sends the error instead. With `riskMode: adaptive` (Task 2), node 2 works as the Risk Engine and sends the session's risk instead (see `risk-model.md`).
+7. The Policy Engine applies the policies P1 to P6, or P1, P2, R1 and P6 in adaptive mode (see Policy Decision below and `policies.md`), writes the decision to the audit log `data/audit.log` (with the request, trust score and breakdown, policy, outcome and reason, see Audit Log below), and only then sends it to node 4.
 8. The page runs only if the decision is allow. Otherwise the user sees `403` with the policy and the reason. No verdict within 10 seconds gives `504`, and an unreachable Access Proxy gives `503`. Both deny access.
 
-The response carries `X-CyberDome-Request-Id`, `X-CyberDome-Decision`, `X-CyberDome-Decided-By` and `X-CyberDome-Policy` headers, so each page can be traced to its decision.
+The response carries `X-CyberDome-Request-Id`, `X-CyberDome-Decision`, `X-CyberDome-Decided-By` and `X-CyberDome-Policy` headers, so each page can be traced to its decision. In adaptive mode, `X-CyberDome-Decision` can also be `STEP_UP`, and `X-CyberDome-Risk` (for example `0.320 MEDIUM`) and `X-CyberDome-Step-Up` (`otp` or `full`) are added.
 
 The access request's `ID` travels through the engines as `request_id`, so each verdict can be matched to its request. Each node is its own class in `cyberdome/networking.py` and only handles the messages it expects. Messages are Python dictionaries wrapped with a sender ID and exchanged by `p2pnetwork` over localhost TCP connections.
 
@@ -82,6 +82,7 @@ The Web UI builds the record in `web/request_context.py`. Every value comes from
 | `device_id` | A random ID in the `cyberdome_device_id` cookie (`HttpOnly`, one year), set on the first visit |
 | `new_device` | `true` until access was allowed once from this device for this user. Known devices are kept in `data/known_devices.json` |
 | `browser`, `device_type`, `device_OS` | The `User-Agent` header |
+| `session_id`, `auth_time`, `acr` | The token, checked with Keycloak: the Keycloak session (`sid`), when the user last logged in, and how (`acr`: `1` password, `2` with MFA). Used by the risk model in adaptive mode (Task 2, `risk-model.md`) |
 
 Why these fields:
 

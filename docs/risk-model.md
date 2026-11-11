@@ -4,7 +4,26 @@ How the adaptive risk model scores each access request (Task 2, sections 3 and 5
 
 The code is in `cyberdome/risk/`. The settings are in the `riskModel` section of `policyConfiguration.yml`. Every setting has a default in `cyberdome/risk/defaults.py`, so a missing or wrong value in the file falls back to a safe value instead of switching a check off.
 
-> **Status:** step 1 of Task 2. The model is built and tested, but the engines don't use it yet. `riskMode` is `static`, so CyberDome still decides exactly like Task 1. Step 2 connects the model to the Trust Engine and the Policy Engine.
+> **Status:** step 2 of Task 2. The model is connected to the engines (see "How the engines use the model" below). It only runs with `riskMode: adaptive`. The default is still `static`, so CyberDome decides exactly like Task 1 until we switch. A step-up is decided and logged, but the Keycloak redirect for it comes in step 3.
+
+## How the engines use the model
+
+With `riskMode: adaptive`, node 2 (the Trust Engine) works as the **Risk Engine**. We didn't add a new node, because one more network hop would make every request slower, and the latency comparison between System A and B would show that instead of the risk model.
+
+```text
+Web UI ──► Access Proxy ──► Risk Engine (node 2) ──► Policy Engine (node 3) ──► Web UI
+            request record    engine.assess()          P1, P2, R1, P6
+            + session_id        reads signals,         audit entry with the risk fields
+            + auth_time         runs the model,        engine.record_decision():
+            + acr               saves the session,       step-up waiting, or learn at LOW
+                                logs a risk event
+```
+
+1. The Web UI adds three values from Keycloak's answer about the token to the request record: `session_id` (the token's `sid`), `auth_time` (when the user last logged in) and `acr` (how: `1` password, `2` with MFA). The browser can't change them.
+2. The Risk Engine (`cyberdome/risk/engine.py`, `assess()`) counts the signals (recent requests, failed logins, role-table denials, verified email), runs `model.evaluate()` under the state lock, saves the session, and writes one line to `data/risk_events.jsonl`.
+3. The Policy Engine decides with R1 (`docs/policies.md`), writes the audit entry with the risk fields (`docs/audit-log.md`), and calls `record_decision()`.
+
+If the risk can't be computed (for example the request has no session ID), node 2 sends the error instead, and R1 denies. A request in a session that belongs to another user is also refused. That should never happen with Keycloak's session IDs, so it would mean something is wrong.
 
 ## Trust in Task 1, risk in Task 2
 
@@ -154,12 +173,16 @@ We will check the choice with numbers: the experiments run the model with `memor
 
 ### How we know a step-up was passed
 
-The Policy Engine (step 2) marks the session with `request_step_up()`. On the next request, the model checks the token's values from Keycloak:
+The Policy Engine marks the session with `request_step_up()` when R1 asks for a step-up. On the next requests, the model checks the token's values from Keycloak:
 
 - `auth_time` must be after the step-up was asked for (a new login happened), and
 - `acr` must be one of `mfaAcrValues` (MFA was used in that login).
 
 Both come from the token that Keycloak signs, so the browser can't fake a passed step-up. If no passed step-up arrives within `stepUpTimeoutMinutes` (5), it counts as failed, and F9 goes up.
+
+If the same or a weaker step-up is asked for again while one is waiting (for example the user reloads the page), the first time is kept. Otherwise reloading would restart the 5 minutes, and an unanswered step-up would never count as failed. A stricter one (`full` while `otp` waits) replaces it.
+
+A passed step-up also sets the session's `verified_level`: the response level it was asked for. R1 doesn't ask again at that level or below for the rest of the session. "A passed step-up covers its level for the session" in `policies.md` explains why.
 
 If OTP doesn't work with our LDAP users, we set `mfaAcrValues: []`. Then a new password login is enough to pass. That is the fallback in the plan, and it has a test.
 
@@ -167,7 +190,7 @@ If OTP doesn't work with our LDAP users, we set `mfaAcrValues: []`. Then a new p
 
 | File | What it holds |
 | --- | --- |
-| `data/risk_state.json` | Each session's state: risk, level, start time, first IP, location and device, previous resource, step-up asked for, failed step-ups |
+| `data/risk_state.json` | Each session's state: risk, level, start time, first IP, location and device, previous resource, step-up waiting (kind, level, time), the level a passed step-up covers, failed step-ups |
 | `data/risk_profiles.json` | Each user's profile (see above) |
 | `data/risk_events.jsonl` | Every risk calculation, one per line, for the "risk score vs. time" graph and the demo |
 
@@ -199,7 +222,7 @@ Behaviour data is personal data under GDPR. We keep only what a feature needs:
 
 ## Tests
 
-`tests/test_risk.py` has 46 tests: the settings and their fallbacks, each feature, the floors, the memory and its ablation, the levels and the admin step up, the task's demo sequence (normal reads, then admin access, then failed logins), step-ups (passed, not passed, too late, password-only fallback), learning, the signal counts from `data/`, and saving the state.
+`tests/test_risk.py` has 52 tests: the settings and their fallbacks, each feature, the floors, the memory and its ablation, the levels and the admin step up, the task's demo sequence (normal reads, then admin access, then failed logins), step-ups (passed, not passed, too late, asked again, the level they cover, password-only fallback), learning, the signal counts from `data/`, saving the state, and the Risk Engine (`engine.py`) with the saved state. The R1 policy is tested in `tests/test_policies.py`.
 
 ```bash
 python3 tests/test_risk.py

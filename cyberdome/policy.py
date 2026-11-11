@@ -6,17 +6,27 @@ access request, its trust score and the user's login history into a decision.
 The policies are checked in order, and the first one that denies decides. If none
 denies, P6 allows. Every decision says which policy decided and why.
 
+riskMode in policyConfiguration.yml chooses the set of policies:
+
+    static    (System A, Task 1)  P1, P2, P3, P4, P5, then P6
+    adaptive  (System B, Task 2)  P1, P2, R1, then P6. R1 chooses the response from the
+                                  session's risk level: allow, OTP step-up, full step-up,
+                                  or deny with an alert.
+
 The policies and the reasons behind them are explained in docs/policies.md.
 
 '''
 from datetime import datetime
 
 from .config import load_policy_configuration
+from .risk import model as risk_model
+from .risk.defaults import risk_settings
 from .trust_algorithm import config_time, is_in_night_window, DEFAULT_NIGHT_END, DEFAULT_NIGHT_START
 
 DEFAULT_ADMIN_MIN_TRUST_SCORE = 0.75
 DEFAULT_PRIVILEGED_ROLES = ['Administrator', 'Policy Administrator', 'Approver']
 DEFAULT_SIGN_IN_SUCCESS_THRESHOLD = 0.5
+RISK_MODES = ('static', 'adaptive')
 
 
 # --- Helpers ---------------------------------------------------------------------
@@ -26,6 +36,11 @@ def number(value, default):
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def risk_mode(config):
+    # Anything other than 'adaptive' runs the Task 1 policies, so a typo can't switch the checks off
+    return 'adaptive' if str(config.get('riskMode', 'static')).strip().lower() == 'adaptive' else 'static'
 
 
 def resource_entry(config, resource):
@@ -146,10 +161,72 @@ POLICIES = [
 ]
 
 
+# --- R1 Adaptive risk (adaptive mode only) ----------------------------------------------
+#
+# R1 returns a whole decision, not only a reason, because its outcome depends on the level.
+
+STEP_UP_FOR_LEVEL = {'MEDIUM': 'otp', 'HIGH': 'full'}
+STEP_UP_TEXT = {'otp': 'a one-time code (OTP)', 'full': 'a full login again (password and OTP)'}
+
+
+def risk_summary(risk):
+    text = f"Session risk {risk['risk']:.3f} ({risk['level']})"
+    if risk.get('top_features'):
+        text += f". Raised by: {risk['top_features']}"
+    if risk.get('floor'):
+        text += f". {risk['floor']}"
+    return text
+
+
+def r1_adaptive_risk(facts):
+    # None if the risk allows access, otherwise the decision
+    risk = facts['risk']
+    base = {'access_decision': 0, 'policy_id': 'R1', 'policy_name': 'Adaptive risk'}
+    if not risk:
+        return dict(base, decision='DENY', outcome='DENY', response_level=None,
+                    reason=f"No risk score for this request ({facts.get('risk_error') or 'the Risk Engine sent none'})")
+
+    response = risk_model.response_level(risk['level'], bool(facts['entry'].get('adminResource')),
+                                         risk_settings(facts['config']))
+    admin_note = ' (one level up, because this is an admin resource)' if response != risk['level'] else ''
+    facts['response_level'] = response
+    if response == 'LOW' or risk_model.is_covered(response, risk.get('verified_level')):
+        return None
+    if response == 'CRITICAL':
+        return dict(base, decision='DENY', outcome='RISK_ALERT', response_level=response,
+                    reason=f"{risk_summary(risk)}. The response level is CRITICAL{admin_note}, so access is denied and an alert is raised")
+    kind = STEP_UP_FOR_LEVEL[response]
+    return dict(base, decision='STEP_UP', outcome='STEP_UP_REQUIRED', step_up=kind, response_level=response,
+                reason=f"{risk_summary(risk)}. The response level is {response}{admin_note}, so {STEP_UP_TEXT[kind]} is needed")
+
+
+def decide_adaptive(facts):
+    for policy_id, name, outcome, check in POLICIES[:2]:  # P1 and P2 stay hard rules
+        reason = check(facts)
+        if reason:
+            return {'decision': 'DENY', 'access_decision': 0, 'policy_id': policy_id, 'policy_name': name,
+                    'outcome': outcome, 'reason': reason}
+
+    decision = r1_adaptive_risk(facts)
+    if decision:
+        return decision
+
+    risk, response = facts['risk'], facts['response_level']
+    if response == 'LOW':
+        why = f"{risk_summary(risk)}, so no extra check is needed"
+    else:
+        why = f"{risk_summary(risk)}. The response level is {response}, and a step-up passed in this session covers it"
+    return {'decision': 'ALLOW', 'access_decision': 1, 'policy_id': 'P6', 'policy_name': 'Permitted access',
+            'outcome': 'ALLOW', 'response_level': response,
+            'reason': f"Role {', '.join(facts['request'].get('roles') or [])} may access {facts['request'].get('resource')}. {why}"}
+
+
 # --- The decision ------------------------------------------------------------------
 
-def decide(access_request, trust_score, trust_factors=None, sign_in_success_rate=None, trust_error=None, config=None):
+def decide(access_request, trust_score, trust_factors=None, sign_in_success_rate=None, trust_error=None, config=None,
+           risk=None, risk_error=None):
     # Returns {'decision', 'access_decision', 'policy_id', 'policy_name', 'outcome', 'reason'}.
+    # In adaptive mode, also 'response_level', and 'step_up' ('otp' or 'full') for a step-up.
     # Tests can pass a configuration directly instead of reading the file.
     if config is None:
         config = load_policy_configuration()
@@ -159,10 +236,15 @@ def decide(access_request, trust_score, trust_factors=None, sign_in_success_rate
         'trust_score': trust_score,
         'trust_factors': trust_factors,
         'trust_error': trust_error,
+        'risk': risk,
+        'risk_error': risk_error,
         'sign_in_success_rate': sign_in_success_rate,
         'config': config,
         'entry': resource_entry(config, access_request.get('resource')),
     }
+
+    if risk_mode(config) == 'adaptive':
+        return decide_adaptive(facts)
 
     for policy_id, name, outcome, check in POLICIES:
         reason = check(facts)

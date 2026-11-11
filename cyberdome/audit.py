@@ -6,7 +6,8 @@ Policy Engine, the Web UI and Keycloak's failed logins.
 Entries are appended to data/audit.log, one JSON object per line, and never changed.
 Each entry has the task's data model fields (user, role, resource, action, device_id,
 source_ip, decision, trust_score, reason), plus the outcome category, the policy, who
-decided, the trust breakdown and the context.
+decided, the trust breakdown and the context. In adaptive mode (Task 2), the Policy
+Engine's entries also have the risk fields (risk_score, risk_level, risk_features, ...).
 
 The log and the reasons behind it are explained in docs/audit-log.md.
 
@@ -17,7 +18,17 @@ from datetime import datetime
 from .data_paths import AUDIT_LOG_FILE, KEYCLOAK_AUDIT_STATE_FILE
 from .jsonl import append_record, read_records_backwards
 
-OUTCOMES = ('ALLOW', 'DENY', 'AUTHENTICATION_FAILURE', 'POLICY_VIOLATION')
+# STEP_UP_REQUIRED and RISK_ALERT come from policy R1 in adaptive mode (Task 2)
+OUTCOMES = ('ALLOW', 'DENY', 'AUTHENTICATION_FAILURE', 'POLICY_VIOLATION', 'STEP_UP_REQUIRED', 'RISK_ALERT')
+
+
+def decision_of(outcome):
+    # The data model's decision field: ALLOW, STEP_UP (access waits for extra verification) or DENY
+    if outcome == 'ALLOW':
+        return 'ALLOW'
+    if outcome == 'STEP_UP_REQUIRED':
+        return 'STEP_UP'
+    return 'DENY'
 
 
 def now():
@@ -37,7 +48,7 @@ def build_entry(outcome, reason, decided_by, request=None, decision=None, trust_
         'time': time or now(),
         'outcome': outcome,
         # The task's data model: the decision, the trust score and the reason ...
-        'decision': 'ALLOW' if outcome == 'ALLOW' else 'DENY',
+        'decision': decision_of(outcome),
         'trust_score': trust_score,
         'reason': reason,
         'policy_id': decision.get('policy_id'),

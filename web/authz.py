@@ -110,7 +110,13 @@ def protected_resource(resource):
                 log_web_ui_decision('DENY', decision.get('reason') or 'The request could not be checked', resource, access_request)
 
             g.access_decision = decision
-            if decision.get('access_decision') != 1:
+            if decision.get('outcome') == 'STEP_UP_REQUIRED':
+                # Adaptive mode. For now the page only says what is needed. The step-up itself
+                # (redirect to Keycloak for an OTP or a full login) comes in Task 2 step 3.
+                response = make_response(access_denied(403, 'Extra verification needed',
+                                                       f"{decision['policy_id']} {decision.get('policy_name', '')}: {decision.get('reason')}",
+                                                       resource))
+            elif decision.get('access_decision') != 1:
                 status = decision.get('http_status', 403)
                 title = 'Access denied' if status == 403 else 'Cannot check your request'
                 reason = decision.get('reason') or 'Denied by the policy.'
@@ -123,9 +129,13 @@ def protected_resource(resource):
 
             # Show which decision this page was served under (useful as evidence and for tests)
             response.headers['X-CyberDome-Request-Id'] = str(decision.get('request_id'))
-            response.headers['X-CyberDome-Decision'] = 'ALLOW' if decision.get('access_decision') == 1 else 'DENY'
+            response.headers['X-CyberDome-Decision'] = str(decision.get('decision') or ('ALLOW' if decision.get('access_decision') == 1 else 'DENY'))
             response.headers['X-CyberDome-Decided-By'] = str(decision.get('decided_by'))
             response.headers['X-CyberDome-Policy'] = str(decision.get('policy_id'))
+            if decision.get('risk_level'):
+                response.headers['X-CyberDome-Risk'] = f"{decision['risk_score']:.3f} {decision['risk_level']}"
+            if decision.get('step_up'):
+                response.headers['X-CyberDome-Step-Up'] = str(decision['step_up'])
             return response
 
         return require_authentication(mediate, resource)

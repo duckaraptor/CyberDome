@@ -118,8 +118,15 @@ def test_entry_has_the_task_data_model_fields():
 
 def test_only_allow_is_an_allow_decision():
     assert audit.build_entry('ALLOW', 'ok', 'Policy Engine')['decision'] == 'ALLOW'
-    for outcome in ('DENY', 'AUTHENTICATION_FAILURE', 'POLICY_VIOLATION'):
+    for outcome in ('DENY', 'AUTHENTICATION_FAILURE', 'POLICY_VIOLATION', 'RISK_ALERT'):
         assert audit.build_entry(outcome, 'no', 'Web UI')['decision'] == 'DENY'
+
+
+def test_step_up_is_its_own_decision():
+    # Adaptive mode: access waits for extra verification, so it's neither allowed nor denied yet
+    entry = audit.build_entry('STEP_UP_REQUIRED', 'risk MEDIUM', 'Policy Engine', risk_score=0.35, risk_level='MEDIUM')
+    assert entry['decision'] == 'STEP_UP'
+    assert (entry['risk_score'], entry['risk_level']) == (0.35, 'MEDIUM')
 
 
 def test_unknown_outcome_is_refused():

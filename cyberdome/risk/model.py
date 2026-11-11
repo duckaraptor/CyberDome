@@ -124,16 +124,33 @@ def new_session(event, now):
         'risk_at': None,
         'level': 'LOW',
         'step_up': None,
+        'verified_level': None,
         'failed_step_ups': 0,
         'requests': 0,
     }
 
 
-def request_step_up(session, kind, now):
-    # Called when the policy asks for a step-up ('otp' or 'full'). The next request shows whether it was passed.
+STEP_UP_KINDS = ('otp', 'full')
+
+
+def request_step_up(session, kind, level, now):
+    # Called when the policy asks for a step-up ('otp' or 'full') for a response level (MEDIUM or HIGH).
+    # The next requests show whether it was passed. If the same or a stricter step-up is already
+    # waiting, its time is kept, so reloading the page doesn't restart the timeout (F9).
     session = dict(session)
-    session['step_up'] = {'kind': kind, 'requested_at': format_time(parse_time(now))}
+    waiting = session.get('step_up')
+    if waiting and STEP_UP_KINDS.index(waiting['kind']) >= STEP_UP_KINDS.index(kind):
+        return session
+    session['step_up'] = {'kind': kind, 'level': level, 'requested_at': format_time(parse_time(now))}
     return session
+
+
+def is_covered(response, verified_level):
+    # A passed step-up covers its level and the levels below it, for the rest of the session.
+    # CRITICAL is never covered.
+    if response == 'CRITICAL' or verified_level not in LEVELS:
+        return False
+    return LEVELS.index(response) <= LEVELS.index(verified_level)
 
 
 def step_up_passed(step_up, event, settings):
@@ -156,6 +173,9 @@ def check_step_up(session, event, now, settings):
     if step_up_passed(step_up, event, settings):
         session['step_up'] = None
         session['failed_step_ups'] = 0
+        # The highest level a passed step-up covered so far in this session
+        if not is_covered(step_up.get('level') or 'MEDIUM', session.get('verified_level')):
+            session['verified_level'] = step_up.get('level') or 'MEDIUM'
         # The verified device and network become the session's own, so they don't keep counting as changes
         session['first_ip'] = event.get('source_ip')
         session['first_location'] = event.get('location')
@@ -255,6 +275,7 @@ def evaluate(event, session, profile, signals, config, now=None):
         'level': level,
         'floor': floor_reason,
         'step_up': step_up,
+        'verified_level': session.get('verified_level'),
         'memory': settings['memory'],
         'previous_resource': previous_resource,
         'features': feature_details,

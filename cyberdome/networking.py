@@ -22,7 +22,9 @@ from . import trust_algorithm as ta
 from . import policy
 from .trust_signals import get_latest_access_request, get_sign_in_success_rate
 from . import audit
+from .config import load_policy_configuration
 from .data_paths import ACCESS_REQUESTS_FILE
+from .risk import engine as risk_engine
 
 ACCESS_PROXY_ID = '1'
 TRUST_ENGINE_ID = '2'
@@ -195,7 +197,11 @@ class AccessProxyNode(Networking):
 
 
 class TrustEngineNode(Networking):
-    '''Node 2: calculates the trust score for the request and sends it to the Policy Engine.'''
+    '''
+    Node 2: scores the request and sends the score to the Policy Engine.
+    With riskMode static it is the Trust Engine (trust score, Task 1). With riskMode adaptive
+    it is the Risk Engine (session risk, Task 2, cyberdome/risk/engine.py).
+    '''
     NODE_ID = TRUST_ENGINE_ID
 
     def process_message_from_access_proxy(self, sender, message):
@@ -204,6 +210,10 @@ class TrustEngineNode(Networking):
         if message.get('intent') == 'request_trust_score':
             user_id = message.get('user_id')
             access_request = message.get('access_request')
+            config = load_policy_configuration()
+            if policy.risk_mode(config) == 'adaptive':
+                self.send_risk_score(message, access_request, config)
+                return
             print(f"Received a Trust Score Request From: {user_id}")
             print(f"Performing Trust Evaluation for the Subject({user_id})...")
 
@@ -235,6 +245,53 @@ class TrustEngineNode(Networking):
             }
             self.send_message_to_node(POLICY_ENGINE_ID,data)
 
+    def send_risk_score(self, message, access_request, config):
+        # Adaptive mode: the session's risk instead of the trust score. If scoring fails, the
+        # Policy Engine still gets an answer and denies with the reason (fail closed).
+        user_id = message.get('user_id')
+        print(f"Performing Risk Evaluation for the Subject({user_id}), session {access_request.get('session_id')}...")
+        risk, risk_error = None, None
+        try:
+            risk = risk_engine.assess(access_request, config)
+            print(f"Subject({user_id}) Session Risk: {risk['risk']} {risk['level']} "
+                  f"(this request {risk['event_risk']}, carried {risk['carried_risk']})")
+            for feature, details in risk['features'].items():
+                print(f"    {feature}: {details['score']} x {details['weight']} ({details['reason']})")
+            if risk['floor']:
+                print(f"    {risk['floor']}")
+        except Exception as e:
+            traceback.print_exc()
+            risk_error = f"Risk evaluation failed: {type(e).__name__}: {e}"
+            print(risk_error)
+
+        self.send_message_to_node(POLICY_ENGINE_ID, {
+            'user_id': user_id,
+            'request_id': message.get('request_id'),
+            'intent': 'request_access_decision',
+            'access_request': access_request,
+            'user_trust_score': None,
+            'trust_factors': None,
+            'risk': risk,
+            'risk_error': risk_error,
+        })
+
+
+def risk_audit_fields(risk, decision):
+    # The audit entry's risk fields in adaptive mode. Static mode adds none, so its entries stay as in Task 1.
+    if not risk:
+        return {}
+    return {
+        'session_id': risk.get('session_id'),
+        'risk_score': risk['risk'],
+        'risk_level': risk['level'],
+        'response_level': decision.get('response_level'),
+        'step_up': decision.get('step_up'),
+        'event_risk': risk['event_risk'],
+        'carried_risk': risk['carried_risk'],
+        'risk_floor': risk['floor'],
+        'risk_features': risk['features'],
+    }
+
 
 class PolicyEngineNode(Networking):
     '''Node 3: applies the policies to the request, saves the decision and sends it, with a reason, to the Web UI.'''
@@ -248,7 +305,8 @@ class PolicyEngineNode(Networking):
         # The share of successful logins over the user's last 10 attempts (higher is better)
         print(f"Sign-in success rate: {sign_in_success_rate}")
         return policy.decide(access_request, message.get('user_trust_score'), message.get('trust_factors'),
-                             sign_in_success_rate, message.get('trust_error'))
+                             sign_in_success_rate, message.get('trust_error'),
+                             risk=message.get('risk'), risk_error=message.get('risk_error'))
 
     def process_message_from_trust_engine(self, sender, message):
         print(f"Received a message from Trust Engine Node [{sender}]: {message}")
@@ -271,9 +329,17 @@ class PolicyEngineNode(Networking):
             print(f"Policy Engine Verdict: {decision['decision']} by {decision['policy_id']} {decision['policy_name']} ({decision['reason']})")
 
             # Log the decision before sending it, so access is never given without an audit entry
+            risk = message.get('risk')
             entry = audit.log_decision(decision['outcome'], decision['reason'], 'Policy Engine', request=access_request,
                                        decision=decision, trust_score=user_trust_score,
-                                       trust_factors=message.get('trust_factors'))
+                                       trust_factors=message.get('trust_factors'), **risk_audit_fields(risk, decision))
+
+            # Adaptive mode: the session remembers a step-up it was asked for, and the profile learns
+            if risk:
+                try:
+                    risk_engine.record_decision(access_request, risk, decision)
+                except Exception:
+                    traceback.print_exc()
 
             # The decision for the Web UI: what it needs to serve or refuse the page
             access_decision_data = {
@@ -292,6 +358,11 @@ class PolicyEngineNode(Networking):
                 'trust_score': user_trust_score,
                 'decided_by': 'Policy Engine',
                 'decided_at': entry['time'],
+                # Adaptive mode only (None in static mode)
+                'step_up': decision.get('step_up'),
+                'response_level': decision.get('response_level'),
+                'risk_score': risk['risk'] if risk else None,
+                'risk_level': risk['level'] if risk else None,
             }
 
             self.send_message_to_node(WEB_UI_ID,access_decision_data)
