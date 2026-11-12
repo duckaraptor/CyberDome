@@ -4,6 +4,28 @@ This file records the changes we make to CyberDome, newest first. For each fix w
 
 ## 2026-11-11
 
+### Added: step-up and session end (Task 2, step 3)
+
+Branch: `feat-adaptive-responses`. The details are in the new `docs/step-up.md`.
+
+**What we saw:** after step 2, R1 decided a step-up or an alert, but the user only saw a refusal page. There was no way to pass a step-up, and a CRITICAL risk didn't end the session.
+
+**What we changed:**
+
+- **Keycloak login flow "browser step-up"** with two levels of authentication: level 1 is the password (a normal login, `acr` 1), level 2 adds an OTP (a step-up, `acr` 2). Level 2 has max age 0, so every step-up asks for a new code and gives a new `auth_time`.
+  - `infra/keycloak/myrealm-realm.json`: the flow, for new setups.
+  - New `scripts/setup_keycloak_step_up.py`: adds the same flow to a realm that already exists (Keycloak doesn't import the realm file again). `--undo` goes back to Keycloak's own flow. The realm file's flow was made with `--print-json`, so both are the same.
+- **Step-up in the Web UI** (new `web/step_up.py`, `web/authz.py`, `web/routes/auth.py`):
+  - `STEP_UP_REQUIRED` redirects to the new `/step-up` page, which sends the user to Keycloak with `acr_values=2`, plus `prompt=login` for a full step-up. After the login, the user is back on the page, and the risk model sees the passed step-up in the token.
+  - The kind of step-up is kept in the signed Flask session, not in the URL, so a user can't ask for an OTP when a full login is needed.
+  - A user who comes back and still needs a step-up within 60 seconds, or who sent a form (POST), gets a page with a "Verify now" button instead of a redirect. This stops a redirect loop.
+- **Session end at CRITICAL:** the Web UI ends the Keycloak session with the user's own refresh token (like logout), clears the Flask session, removes the risk state (new `engine.end_session()`), and writes a Web UI audit entry `RISK_ALERT` saying the session ended.
+- The refusal page (`access_denied.html`) can show a button other than "Back to home".
+
+**A change from the plan:** at HIGH, every request needs the full step-up. We didn't build the read-only mode (reads allowed until the step-up). At HIGH someone else may be using the session, and read-only would still let them read every page. `docs/step-up.md` explains this.
+
+**Tests:** 129 unit tests pass (1 new for `end_session()`). The Web UI parts need Keycloak, so we test them in the browser. We haven't done that yet: the flow has to be added to our realm first (`python3 scripts/setup_keycloak_step_up.py`), and then we need to check that an OTP step-up gives a token with a new `auth_time`.
+
 ### Added: adaptive mode in the engines (Task 2, step 2)
 
 Branch: `feat-adaptive-policy`. The details are in `docs/policies.md` ("Adaptive mode"), `docs/risk-model.md` ("How the engines use the model") and `docs/audit-log.md` ("Risk fields").

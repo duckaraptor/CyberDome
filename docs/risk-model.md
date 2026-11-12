@@ -4,7 +4,7 @@ How the adaptive risk model scores each access request (Task 2, sections 3 and 5
 
 The code is in `cyberdome/risk/`. The settings are in the `riskModel` section of `policyConfiguration.yml`. Every setting has a default in `cyberdome/risk/defaults.py`, so a missing or wrong value in the file falls back to a safe value instead of switching a check off.
 
-> **Status:** step 2 of Task 2. The model is connected to the engines (see "How the engines use the model" below). It only runs with `riskMode: adaptive`. The default is still `static`, so CyberDome decides exactly like Task 1 until we switch. A step-up is decided and logged, but the Keycloak redirect for it comes in step 3.
+> **Status:** step 3 of Task 2. The model is connected to the engines (see "How the engines use the model" below), and the Web UI carries out the responses (`step-up.md`). It only runs with `riskMode: adaptive`. The default is still `static`, so CyberDome decides exactly like Task 1 until we switch.
 
 ## How the engines use the model
 

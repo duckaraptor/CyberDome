@@ -78,12 +78,14 @@ Any value other than `adaptive` (also a typo) runs the static policies, so a mis
 
 R1 takes the session's risk level from the Risk Engine. For an admin resource (`adminResource: true`), it moves the level up by `riskModel.adminLevelBump` (1) first. The result is the **response level**:
 
-| Response level | Decision | Outcome in the log | What the user gets (step 2 / step 3) |
+| Response level | Decision | Outcome in the log | What the user gets |
 | --- | --- | --- | --- |
 | LOW | Allow (P6) | `ALLOW` | The page |
-| MEDIUM | Step-up, `otp` | `STEP_UP_REQUIRED` | Step 2: a page that says an OTP is needed. Step 3: Keycloak asks for a one-time code |
-| HIGH | Step-up, `full` | `STEP_UP_REQUIRED` | Step 2: a page that says a full login is needed. Step 3: Keycloak asks for the password and the OTP again |
-| CRITICAL | Deny | `RISK_ALERT` | `403`. Step 3 also ends the session at Keycloak |
+| MEDIUM | Step-up, `otp` | `STEP_UP_REQUIRED` | Keycloak asks for a one-time code (OTP), then the page |
+| HIGH | Step-up, `full` | `STEP_UP_REQUIRED` | Keycloak asks for the password and an OTP again, then the page |
+| CRITICAL | Deny | `RISK_ALERT` | `403`, and the session is ended at Keycloak |
+
+How the Web UI carries out each response is in `step-up.md`.
 
 If the Risk Engine sent no risk (for example the request has no session ID), R1 denies with the reason (`DENY`). That is fail closed, like P5 without a trust score.
 
@@ -227,7 +229,7 @@ The trust score and P3 use the user's recent logins from Keycloak's events. If t
 
 ## Limits and future work
 
-- **Step-up MFA.** For medium risk, a real system would ask for a second factor (for example an OTP in Keycloak) instead of denying. This is the adaptive authentication our charter is about. Task 2 adds it in adaptive mode (R1, see "Adaptive mode" above). In step 2 the step-up is only decided and logged. Step 3 adds the Keycloak redirect.
+- **Step-up MFA.** For medium risk, a real system would ask for a second factor (for example an OTP in Keycloak) instead of denying. This is the adaptive authentication our charter is about. Task 2 adds it in adaptive mode (R1, see "Adaptive mode" above, and `step-up.md`).
 - **MFA for admins.** Requiring MFA for admin resources would be stronger than a minimum score. Our demo users don't have MFA set up.
 - **The device rule is weak.** A device becomes known after one allowed request. A real system would register devices, for example through device management (MDM).
 - **Invalid tokens never reach the Policy Engine.** The Web UI refuses them with `401`, because it can't build a request record without a valid token. The audit log (section 3.5) records these as `AUTHENTICATION_FAILURE` from the Web UI.

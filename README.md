@@ -36,6 +36,7 @@ More pictures, step by step, are in [docs/diagrams.md](docs/diagrams.md).
 | [Policies](docs/policies.md) | The policies P1 to P6, the settings, why they look like this, and which policy decides each scenario |
 | [Audit log](docs/audit-log.md) | What gets logged, what an entry looks like, the task's data model, and why the log is append-only |
 | [Risk model](docs/risk-model.md) | Task 2: the 9 risk features, the risk score with memory, the levels, floors, step-up and recovery, and how the engines use it with `riskMode: adaptive` |
+| [Step-up and session end](docs/step-up.md) | Task 2: the OTP and full step-up through Keycloak, ending the session at CRITICAL, and how to set up the Keycloak login flow |
 | [Changelog](docs/changelog.md) | Every change, newest first, with what we saw and what we changed |
 
 ## Demo users and roles
@@ -92,6 +93,12 @@ The local development endpoints and credentials are:
 | Web UI users | Keycloak login | see [Demo users and roles](#demo-users-and-roles) |
 
 These credentials are for local development only. The imported `myrealm` realm contains the `ZeroTrustPlatform` client expected by the application.
+
+For Task 2's step-up (adaptive mode), Keycloak needs the "browser step-up" login flow. A new realm gets it from the realm file. A realm created before Task 2 step 3 needs it added once (see [docs/step-up.md](docs/step-up.md)):
+
+```bash
+python3 scripts/setup_keycloak_step_up.py
+```
 
 ### Run CyberDome
 

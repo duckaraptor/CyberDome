@@ -15,6 +15,7 @@ Every decision, wherever it is made:
 | Web UI | The login token is invalid, expired or revoked (`401`) | `AUTHENTICATION_FAILURE` |
 | Web UI | Keycloak can't be reached to check the token (`503`) | `DENY` |
 | Web UI | The decision engines are down (`503`) or don't answer in time (`504`) | `DENY` |
+| Web UI | Adaptive mode: the session was ended after a CRITICAL risk (see `step-up.md`) | `RISK_ALERT` |
 | Keycloak | A failed login, for example a wrong password (Keycloak's `LOGIN_ERROR` events) | `AUTHENTICATION_FAILURE` |
 
 The first four outcomes are the categories Task 1 asks for. Task 2 (adaptive mode) adds two:

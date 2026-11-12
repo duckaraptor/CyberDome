@@ -11,7 +11,9 @@
         <h1>{{ status }} {{ title }}</h1>
         <p>{{ reason }}</p>
         {% if resource %}<p><small>Resource: {{ resource }}</small></p>{% endif %}
-        {% if status == 401 %}
+        {% if action_url %}
+        <a href="{{ action_url }}" class="btn-authenticate">{{ action_label }}</a>
+        {% elif status == 401 %}
         <a href="/logout" class="btn-authenticate">Log in again</a>
         {% else %}
         <a href="/home" class="btn-authenticate">Back to home</a>

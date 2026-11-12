@@ -1,6 +1,6 @@
 '''
 
-Login, logout (token revocation) and the home page. The home page also
+Login, logout (token revocation), the step-up page (Task 2) and the home page. The home page also
 collects the user's identity and Keycloak login events into data/.
 
 '''
@@ -17,6 +17,7 @@ from cyberdome.trust_signals import load_events_data, process_events, store_keyc
 from extensions import keycloak_admin, keycloak_openid, oidc
 from keycloak_config import KEYCLOAK_CLIENT_ID, KEYCLOAK_CLIENT_SECRET, REVOCATION_URL
 from keycloak_functions import extract_user_role, revoke_token, token_is_valid
+from step_up import redirect_to_step_up
 
 bp = Blueprint('auth', __name__)
 
@@ -64,6 +65,15 @@ def login():
         return response
     else:
         return render_template('index.html')
+
+
+# Step-up (Task 2): sends the user to Keycloak for the OTP or full login that the Policy Engine
+# asked for. The kind of step-up is read from the signed Flask session, not from the URL.
+@bp.route('/step-up')
+def step_up():
+    if not oidc.user_loggedin:
+        return redirect(url_for('auth.login'))
+    return redirect_to_step_up() or redirect(url_for('auth.home'))
 
 
 # The home route where all the available services are located

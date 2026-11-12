@@ -143,3 +143,16 @@ def record_decision(access_request, risk, decision, store=None):
             user_id = access_request['user_id']
             profiles[user_id] = model.learn(profiles.get(user_id), access_request, risk.get('previous_resource'),
                                             (risk.get('signals') or {}).get('recent_requests', 0))
+
+
+def end_session(session_id, store=None):
+    '''
+    Removes a session's risk state when the session is ended at CRITICAL risk. Its length doesn't
+    teach the user's usual session length, because it ended for a reason. The user's profile and
+    failed logins stay, so a new session during an attack doesn't start clean.
+    '''
+    if not session_id:
+        return False
+    store = store or RiskStore()
+    with store.locked() as (sessions, _profiles):
+        return sessions.pop(str(session_id), None) is not None

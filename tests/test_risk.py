@@ -571,6 +571,17 @@ def test_engine_remembers_a_step_up_and_learns_only_at_low():
             assert sessions['session-1']['step_up'] == {'kind': 'otp', 'level': 'MEDIUM', 'requested_at': at(2)}
 
 
+def test_engine_ends_a_session_without_learning_its_length():
+    with tempfile.TemporaryDirectory() as folder:
+        store = store_in(folder)
+        engine.assess(request(1), CONFIG, store, signals=SIGNALS)
+        assert engine.end_session('session-1', store) is True
+        assert engine.end_session('session-1', store) is False
+        assert engine.end_session(None, store) is False
+        with store.locked() as (sessions, profiles):
+            assert sessions == {} and 'bob-id' not in profiles
+
+
 if __name__ == '__main__':
     tests = [(name, test) for name, test in sorted(globals().items()) if name.startswith('test_') and callable(test)]
     failed = 0
