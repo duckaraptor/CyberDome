@@ -42,6 +42,15 @@ resources:
     path: /configurePolicies
     writeRoles:
     - Policy Administrator
+  risk_monitoring:
+    adminResource: true
+    allowedRoles:
+    - Administrator
+    - Security Viewer
+    description: Risk monitor (active sessions and their risk over time)
+    minTrustScore: 0.6
+    path: /risk
+    writeRoles: []
   resource_1:
     adminResource: false
     allowedRoles:

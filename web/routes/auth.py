@@ -11,12 +11,11 @@ from flask import Blueprint, make_response, redirect, render_template, session, 
 from keycloak import KeycloakAuthenticationError
 
 from cyberdome.access_rules import is_role_allowed
-from cyberdome import audit
-from cyberdome.data_paths import EVENTS_FILE, USER_DATA_FILE
-from cyberdome.trust_signals import load_events_data, process_events, store_keycloak_events
+from cyberdome.data_paths import USER_DATA_FILE
 from extensions import keycloak_admin, keycloak_openid, oidc
 from keycloak_config import KEYCLOAK_CLIENT_ID, KEYCLOAK_CLIENT_SECRET, REVOCATION_URL
 from keycloak_functions import extract_user_role, revoke_token, token_is_valid
+from monitor import sync_keycloak_events
 from step_up import redirect_to_step_up
 
 bp = Blueprint('auth', __name__)
@@ -92,19 +91,10 @@ def home():
                     user_roles = extract_user_role(oidc,keycloak_openid)
                     user_role = user_roles[0] if user_roles else None
 
-                    #storing keycloak events
-                    store_keycloak_events(keycloak_admin)
-
-                    events_file_path = EVENTS_FILE
-
-                    events_data = load_events_data(events_file_path)
-                    # Process event data to yield the auth_data
-                    if events_data:
-                        process_events(events_data)
-                        # Copy new failed logins into the audit log (AUTHENTICATION_FAILURE)
-                        audit.import_keycloak_login_errors(events_data)
-                    else:
-                        print("Failed to load events data.")
+                    # Pull Keycloak's login events into data/ and copy new failed logins into the
+                    # audit log. The monitor thread does this every 10 seconds too (monitor.py).
+                    # This call makes sure a user's own login is in data/ before their first request.
+                    sync_keycloak_events()
 
                     all_users = keycloak_admin.get_users()
 
@@ -147,6 +137,7 @@ def home():
                         'option2': is_role_allowed(user_roles, 'policy_configuration'),  # PAM request, which leads to policy configuration
                         'option3': is_role_allowed(user_roles, 'logging'),
                         'option4': is_role_allowed(user_roles, 'pam_approval'),
+                        'option5': is_role_allowed(user_roles, 'risk_monitoring'),
                     }
 
                     return render_template('home.html', username=username, email=email, user_id=user_id,

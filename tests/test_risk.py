@@ -582,6 +582,71 @@ def test_engine_ends_a_session_without_learning_its_length():
             assert sessions == {} and 'bob-id' not in profiles
 
 
+# --- Continuous monitoring: the risk between requests (Task 2, step 4) ---------------------
+
+def test_failed_logins_raise_the_risk_without_a_request():
+    profile = bob_profile()
+    _, session = evaluate(request(1), profile=profile)
+    result, after = model.reassess(session, {'auth_failures': 5}, CONFIG, at(3))
+    assert result['previous_level'] == 'LOW' and result['level'] == 'HIGH'
+    assert 'authFailures' in result['floor']
+    assert after['level'] == 'HIGH' and after['risk_at'] == at(3)
+    assert after['last_request_at'] == at(1)   # the monitor doesn't count as activity
+
+
+def test_monitor_keeps_the_context_of_the_last_request():
+    # A device change and failed logins together are worse than failed logins alone
+    profile = bob_profile()
+    _, plain = evaluate(request(1), profile=profile)
+    _, odd = evaluate(request(1, device_id='other', new_device=True), session=evaluate(request(0), profile=profile)[1],
+                      profile=profile)
+    plain_result, _ = model.reassess(plain, {'auth_failures': 3}, CONFIG, at(2))
+    odd_result, _ = model.reassess(odd, {'auth_failures': 3}, CONFIG, at(2))
+    assert odd_result['event_risk'] > plain_result['event_risk']
+
+
+def test_monitor_acts_only_on_new_information():
+    # The same failed logins don't raise the risk again and again, so the risk can decay
+    _, session = evaluate(request(1))
+    first, session = model.reassess(session, {'auth_failures': 5}, CONFIG, at(2))
+    again, session = model.reassess(session, {'auth_failures': 5}, CONFIG, at(10))
+    assert first['level'] == 'HIGH' and again is None
+    assert session['risk'] == first['risk']   # stored once, and decayed from there by the reader
+
+
+def test_monitor_never_lowers_the_risk():
+    _, session = evaluate(request(1, device_id='other', new_device=True), session=evaluate(request(0))[1])
+    result, after = model.reassess(session, {'auth_failures': 0}, CONFIG, at(2))
+    assert result is None and after['risk'] == session['risk']
+
+
+def test_monitor_counts_an_unanswered_step_up():
+    _, session = evaluate(request(1))
+    session = model.request_step_up(session, 'otp', 'MEDIUM', at(1))
+    _, after = model.reassess(session, {}, CONFIG, at(1 + SETTINGS['stepUpTimeoutMinutes']))
+    assert after['failed_step_ups'] == 1 and after['step_up'] is None
+
+
+def test_monitor_does_nothing_before_the_first_request():
+    session = model.new_session(request(1), LOGIN)
+    assert model.reassess(session, {'auth_failures': 5}, CONFIG, at(2))[0] is None
+
+
+def test_engine_monitor_raises_logs_and_lets_idle_sessions_end():
+    with tempfile.TemporaryDirectory() as folder:
+        store = store_in(folder)
+        engine.assess(request(1), CONFIG, store, signals=SIGNALS)
+        raised = engine.monitor_sessions(CONFIG, at(2), store, count_failures=lambda user_id, now, minutes: 5)
+        assert [(change['session_id'], change['result']['level']) for change in raised] == [('session-1', 'HIGH')]
+        events = [json.loads(line) for line in open(store.events_file)]
+        assert events[-1]['source'] == 'monitor' and events[-1]['level'] == 'HIGH'
+        assert engine.monitor_sessions(CONFIG, at(3), store, count_failures=lambda *_: 5) == []  # no new rise
+        sessions = engine.active_sessions(CONFIG, at(12), store)
+        assert sessions[0]['risk_now'] < sessions[0]['risk']   # decayed for the page
+        engine.monitor_sessions(CONFIG, at(1 + 30), store, count_failures=lambda *_: 0)
+        assert engine.active_sessions(CONFIG, at(31), store) == []   # 30 minutes after the last request
+
+
 if __name__ == '__main__':
     tests = [(name, test) for name, test in sorted(globals().items()) if name.startswith('test_') and callable(test)]
     failed = 0

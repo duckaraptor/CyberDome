@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Risk Monitor</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0 20px 30px;
+            background-color: #f5f5f5;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 5px;
+        }
+
+        .hint {
+            text-align: center;
+            color: #666;
+            margin-bottom: 15px;
+        }
+
+        .warning {
+            max-width: 900px;
+            margin: 0 auto 15px;
+            padding: 10px;
+            background-color: #fff3e0;
+            border: 1px solid #ffb74d;
+        }
+
+        .session {
+            max-width: 900px;
+            margin: 0 auto 15px;
+            padding: 10px 15px;
+            background-color: #fff;
+            border: 1px solid #ddd;
+        }
+
+        .session h2 {
+            font-size: 16px;
+            margin: 0 0 6px;
+        }
+
+        .facts {
+            font-size: 13px;
+            color: #444;
+            margin-bottom: 8px;
+        }
+
+        .level {
+            font-weight: bold;
+            padding: 1px 6px;
+            border-radius: 3px;
+            color: #fff;
+        }
+
+        .LOW { background-color: #2e7d32; }
+        .MEDIUM { background-color: #f9a825; }
+        .HIGH { background-color: #e65100; }
+        .CRITICAL { background-color: #b71c1c; }
+
+        svg {
+            width: 100%;
+            height: auto;
+            background-color: #fafafa;
+            border: 1px solid #eee;
+        }
+
+        .axis {
+            font-size: 11px;
+            color: #777;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .links {
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <h1>Risk Monitor</h1>
+    <p class="hint">
+        Active sessions and their risk, newest data at {{ now }}. The monitor recalculates every session every
+        {{ interval }} seconds. Each chart shows the last {{ chart_hours }} hours: a dot per request or monitor change,
+        dashed lines at the thresholds.
+    </p>
+    <p class="links"><a href="/risk">Refresh</a> · <a href="/logging">Audit log</a> · <a href="/home">Home</a></p>
+
+    {% if mode != 'adaptive' %}
+    <div class="warning">riskMode is <b>{{ mode }}</b>, so the engines use the Task 1 trust score and no session risk is calculated. Set <code>riskMode: adaptive</code> in policyConfiguration.yml to use the risk model.</div>
+    {% endif %}
+
+    {% if not sessions %}
+    <p class="hint">No active sessions.</p>
+    {% endif %}
+
+    {% for session in sessions %}
+    <div class="session">
+        <h2>
+            {{ session.get('username') or session.get('user_id') }}
+            <span class="level {{ session.level_now }}">{{ session.level_now }}</span>
+            risk {{ '%.3f' % session.risk_now }}
+        </h2>
+        <div class="facts">
+            Session {{ session.session_id }} · started {{ session.get('started_at') }}
+            · last request {{ session.get('last_request_at') or session.get('risk_at') or '-' }}
+            · {{ session.get('requests', 0) }} requests
+            · first IP {{ session.get('first_ip') or '-' }} ({{ session.get('first_location') or '-' }})
+            {% if session.get('step_up') %}· <b>step-up waiting: {{ session.step_up.kind }}</b> since {{ session.step_up.requested_at }}{% endif %}
+            {% if session.get('verified_level') %}· step-up passed, covers {{ session.verified_level }}{% endif %}
+            {% if session.get('failed_step_ups') %}· failed step-ups: {{ session.failed_step_ups }}{% endif %}
+        </div>
+        <svg viewBox="0 0 {{ session.chart.width }} {{ session.chart.height }}" preserveAspectRatio="none" role="img"
+             aria-label="Risk of this session over time">
+            {% for threshold in session.chart.thresholds %}
+            <line x1="0" x2="{{ session.chart.width }}" y1="{{ threshold.y }}" y2="{{ threshold.y }}"
+                  stroke="#bbb" stroke-dasharray="4 4" stroke-width="1"></line>
+            <text x="4" y="{{ threshold.y - 3 }}" font-size="10" fill="#999">{{ threshold.level }}</text>
+            {% endfor %}
+            {% if session.chart.line %}
+            <polyline points="{{ session.chart.line }}" fill="none" stroke="#1565c0" stroke-width="2"></polyline>
+            {% endif %}
+            {% for dot in session.chart.dots %}
+            <circle cx="{{ dot.x }}" cy="{{ dot.y }}" r="3" class="{{ dot.level }}" fill="currentColor"
+                    style="color: {{ {'LOW': '#2e7d32', 'MEDIUM': '#f9a825', 'HIGH': '#e65100', 'CRITICAL': '#b71c1c'}.get(dot.level, '#555') }}">
+                <title>{{ dot.title }}</title>
+            </circle>
+            {% endfor %}
+        </svg>
+        <div class="axis"><span>{{ chart_hours }} hours ago</span><span>now</span></div>
+    </div>
+    {% endfor %}
+</body>
+</html>

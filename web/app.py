@@ -19,6 +19,7 @@ from extensions import db, oidc
 from keycloak_config import (AUTHORIZATION_URL, INTROSPECTION_URL, ISSUER_URL, KEYCLOAK_CLIENT_ID, KEYCLOAK_REALM,
                              TOKEN_URL, USERINFO_URL)
 import models  # registers the PAM database tables with db
+from monitor import start_monitor, stop_monitor
 from proxy_client import stop_node
 from request_context import load_device_id, save_device_cookie
 from routes import access, auth, monitoring, policy_config, privileged_access, resources
@@ -71,6 +72,9 @@ db.init_app(app)
 app.before_request(load_device_id)
 app.after_request(save_device_cookie)
 
+# Continuous monitoring (monitor.py): started on the first request, in the process that serves requests
+app.before_request(start_monitor)
+
 # The pages, one blueprint per area
 for blueprint_module in (auth, access, resources, policy_config, monitoring, privileged_access):
     app.register_blueprint(blueprint_module.bp)
@@ -81,5 +85,6 @@ if __name__ == "__main__":
     try:
         app.run(debug=True)
     finally:
-        # Stop the connection to the decision engines, so Ctrl+C exits cleanly
+        # Stop the monitor and the connection to the decision engines, so Ctrl+C exits cleanly
+        stop_monitor()
         stop_node()
