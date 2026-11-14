@@ -126,6 +126,7 @@ Per resource, in the `resources` table of `policyConfiguration.yml`:
 | `pam_approval` | Approver | Approver | No | 0.75 |
 | `policy_configuration` | Administrator, Policy Administrator | Policy Administrator | Yes | 0.6 |
 | `logging` | Administrator, Security Viewer | nobody | Yes | 0.6 |
+| `risk_monitoring` (the `/risk` page, Task 2, `monitoring.md`) | Administrator, Security Viewer | nobody | Yes | 0.6 |
 
 A resource without `writeRoles` can't be changed by anyone (fail closed).
 

@@ -190,7 +190,7 @@ If OTP doesn't work with our LDAP users, we set `mfaAcrValues: []`. Then a new p
 
 | File | What it holds |
 | --- | --- |
-| `data/risk_state.json` | Each session's state: risk, level, start time, first IP, location and device, previous resource, step-up waiting (kind, level, time), the level a passed step-up covers, failed step-ups |
+| `data/risk_state.json` | Each session's state: risk, level, start time, first IP, location and device, previous resource, step-up waiting (kind, level, time), the level a passed step-up covers, failed step-ups, the time and the 9 scores of the last request (for the monitor, `monitoring.md`) |
 | `data/risk_profiles.json` | Each user's profile (see above) |
 | `data/risk_events.jsonl` | Every risk calculation, one per line, for the "risk score vs. time" graph and the demo |
 

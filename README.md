@@ -37,6 +37,7 @@ More pictures, step by step, are in [docs/diagrams.md](docs/diagrams.md).
 | [Audit log](docs/audit-log.md) | What gets logged, what an entry looks like, the task's data model, and why the log is append-only |
 | [Risk model](docs/risk-model.md) | Task 2: the 9 risk features, the risk score with memory, the levels, floors, step-up and recovery, and how the engines use it with `riskMode: adaptive` |
 | [Step-up and session end](docs/step-up.md) | Task 2: the OTP and full step-up through Keycloak, ending the session at CRITICAL, and how to set up the Keycloak login flow |
+| [Continuous monitoring](docs/monitoring.md) | Task 2: the monitor thread that recalculates each session's risk every 10 seconds, and the `/risk` page |
 | [Changelog](docs/changelog.md) | Every change, newest first, with what we saw and what we changed |
 
 ## Demo users and roles

@@ -145,6 +145,57 @@ def record_decision(access_request, risk, decision, store=None):
                                             (risk.get('signals') or {}).get('recent_requests', 0))
 
 
+def monitor_sessions(config, now, store=None, count_failures=count_auth_failures):
+    '''
+    Continuous monitoring: recalculates every active session's risk without a request
+    (model.reassess). Called by the Web UI's monitor thread every few seconds.
+
+    Returns the sessions whose risk went up, as dicts with session_id, user_id, username and the
+    model's result. The caller ends the ones at CRITICAL. Each rise is also logged as a risk event
+    with source "monitor".
+    '''
+    store = store or RiskStore()
+    settings = risk_settings(config)
+    now = model.format_time(model.parse_time(now))
+    window = settings['authFailures']['windowMinutes']
+    raised = []
+    with store.locked() as (sessions, profiles):
+        end_idle_sessions(sessions, profiles, now)
+        for session_id, session in sessions.items():
+            signals = {'auth_failures': count_failures(session.get('user_id'), now, window)}
+            result, sessions[session_id] = model.reassess(session, signals, config, now)
+            if result:
+                raised.append({'session_id': session_id, 'user_id': session.get('user_id'),
+                               'username': session.get('username'), 'result': result, 'signals': signals})
+
+    for change in raised:
+        record = event_record({'access_request_time': now, 'session_id': change['session_id'],
+                               'user_id': change['user_id'], 'username': change['username']},
+                              change['result'], change['signals'])
+        record['source'] = 'monitor'
+        try:
+            store.log_event(record)
+        except OSError as e:
+            print(f"Could not write the risk event: {e}")
+    return raised
+
+
+def active_sessions(config, now, store=None):
+    # Every active session with its risk decayed to now, highest first (for the /risk page)
+    store = store or RiskStore()
+    settings = risk_settings(config)
+    now = model.parse_time(now)
+    with store.locked() as (sessions, _profiles):
+        sessions = dict(sessions)
+    rows = []
+    for session_id, session in sessions.items():
+        risk_at = model.parse_time(session['risk_at']) if session.get('risk_at') else now
+        risk = model.decayed(session.get('risk', 0.0), model.minutes_between(risk_at, now), settings['halfLifeMinutes'])
+        rows.append(dict(session, session_id=session_id, risk_now=round(risk, 4),
+                         level_now=model.level_of(risk, settings['thresholds'])))
+    return sorted(rows, key=lambda row: row['risk_now'], reverse=True)
+
+
 def end_session(session_id, store=None):
     '''
     Removes a session's risk state when the session is ended at CRITICAL risk. Its length doesn't

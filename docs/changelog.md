@@ -2,6 +2,29 @@
 
 This file records the changes we make to CyberDome, newest first. For each fix we write what we saw, what was wrong and how we fixed it. Runtime-generated data is listed separately from intentional source and configuration changes.
 
+## 2026-11-13
+
+### Added: continuous monitoring and the /risk page (Task 2, step 4)
+
+Branch: `feat-continuous-monitoring`. The details are in the new `docs/monitoring.md`.
+
+**What we saw:** the risk was only recalculated when the user sent a request. Failed logins only reached CyberDome when someone opened the home page or `/logging`. So if someone guessed a logged-in user's password at the login page, CyberDome only noticed at the user's next request, and only if someone had opened one of those pages in between.
+
+**What we changed:**
+
+- New `web/monitor.py`: a background thread in the Web UI. Every 10 seconds it pulls Keycloak's login events (both modes). In adaptive mode it also recalculates every active session, and ends a session that reaches CRITICAL at Keycloak (admin API), with a `RISK_ALERT` audit entry from "Risk Monitor". It starts with the first request (`web/app.py`).
+- New `model.reassess()`: the session's risk without a request. It takes the scores of the last request, with new values for F4 (failed logins) and F9 (unanswered step-ups), and only ever raises the risk.
+- New `engine.monitor_sessions()` and `engine.active_sessions()`. Monitor changes go to `data/risk_events.jsonl` with `"source": "monitor"`.
+- New `/risk` page (`web/routes/monitoring.py`, `web/templates/risk_monitor.html`) for Administrator and Security Viewer: the active sessions, their risk now, and a chart of the risk over the last 2 hours. New resource `risk_monitoring` in `policyConfiguration.yml`, and a fifth option on the home page.
+- The home page and `/logging` had their own copies of the event sync. Both now call `monitor.sync_keycloak_events()`, which holds a lock, so two syncs can't write `data/events.json` at the same moment.
+- A session ends 30 minutes after its last request (`last_request_at`), not after its last risk change, so the monitor can't keep a session alive.
+
+**A problem we found while testing, and the fix:** the first version scored the last request again in every round. A device change from long ago then kept pushing the risk back up every 10 seconds, so it never decayed. Now the monitor only acts when F4 or F9 went up since they were last scored, and it stores the new values. A test checks that the same failed logins raise the risk once, not every round.
+
+**What this means with the default settings:** the monitor alone raises a session to HIGH (the failed-logins floor), not CRITICAL. So in practice, failed logins put the session at HIGH, and the next request needs a full step-up. The code that ends a session from the monitor runs when the settings allow CRITICAL. The experiments decide the final values.
+
+**Tests:** 136 unit tests pass (7 new for the monitor in `tests/test_risk.py`). We also rendered the `/risk` page with sample sessions: a session the monitor raised to HIGH 10 minutes earlier showed 0.275 (LOW), as the half-life of 10 minutes predicts. The thread and the session end through Keycloak's admin API still need a run with the real Keycloak.
+
 ## 2026-11-11
 
 ### Added: step-up and session end (Task 2, step 3)

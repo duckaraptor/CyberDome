@@ -260,13 +260,11 @@ def evaluate(event, session, profile, signals, config, now=None):
     level = level_of(risk, settings['thresholds'])
     previous_resource = session.get('last_resource')
     session.update(risk=round(risk, 4), risk_at=format_time(now), level=level, last_resource=event.get('resource'),
-                   requests=session.get('requests', 0) + 1)
+                   requests=session.get('requests', 0) + 1, last_request_at=format_time(now),
+                   # The scores of this request, so the monitor can recalculate the risk in this context
+                   last_features={name: round(score, 3) for name, (score, _) in feature_scores.items()})
 
-    weights_total = sum(settings['weights'].values())
-    feature_details = {
-        name: {'score': round(score, 3), 'weight': round(settings['weights'][name] / weights_total, 3), 'reason': reason}
-        for name, (score, reason) in ((name, feature_scores[name]) for name in FEATURES)
-    }
+    feature_details = details_of(feature_scores, settings)
     result = {
         'risk': round(risk, 4),
         'event_risk': round(event_risk, 4),
@@ -278,6 +276,78 @@ def evaluate(event, session, profile, signals, config, now=None):
         'verified_level': session.get('verified_level'),
         'memory': settings['memory'],
         'previous_resource': previous_resource,
+        'features': feature_details,
+        'top_features': top_features(feature_details),
+    }
+    return result, session
+
+
+def details_of(feature_scores, settings):
+    weights_total = sum(settings['weights'].values())
+    return {
+        name: {'score': round(score, 3), 'weight': round(settings['weights'][name] / weights_total, 3), 'reason': reason}
+        for name, (score, reason) in ((name, feature_scores[name]) for name in FEATURES)
+    }
+
+
+# --- Continuous monitoring: the risk between requests ------------------------------
+
+def reassess(session, signals, config, now):
+    '''
+    Recalculates a session's risk without a request (continuous monitoring, task section 5.3).
+
+    Things can happen between two requests: failed logins for the user at Keycloak (F4), or a
+    step-up that was never answered (F9). The other features describe a request, so they keep
+    their scores from the session's last request. The event risk is calculated from those
+    scores, with F4 and F9 updated, in the same way as for a request.
+
+    Only new information counts: if F4 and F9 are not higher than the last time they were scored
+    (by a request or by the monitor), nothing changes. Otherwise the monitor would score the
+    last request again every round, and its risk would never decay.
+
+    Returns (result, session). result is None if the risk didn't go up: the monitor only raises
+    a session's risk, it never lowers it (the decay does that). The session can still change,
+    for example when a step-up timed out.
+    '''
+    settings = risk_settings(config)
+    now = parse_time(now)
+    session = copy.deepcopy(session)
+    session, step_up = check_step_up(session, {}, now, settings)
+    last = session.get('last_features')
+    if not last:
+        return None, session  # no request scored yet
+
+    feature_scores = {name: (float(last.get(name, 0.0)), 'from the last request') for name in FEATURES}
+    feature_scores['authFailures'] = f.auth_failures((signals or {}).get('auth_failures', 0), settings['authFailures'])
+    feature_scores['mfaReaction'] = f.mfa_reaction(session.get('failed_step_ups', 0), settings['mfaReaction'])
+    new_information = any(feature_scores[name][0] > float(last.get(name, 0.0)) + 1e-9
+                          for name in ('authFailures', 'mfaReaction'))
+    if not new_information:
+        return None, session
+    session['last_features'] = dict(last, authFailures=round(feature_scores['authFailures'][0], 3),
+                                    mfaReaction=round(feature_scores['mfaReaction'][0], 3))
+    event_risk, floor_reason = apply_floors(weighted_risk(feature_scores, settings['weights']), feature_scores, settings)
+
+    previous_risk = session.get('risk', 0.0)
+    previous_at = parse_time(session['risk_at']) if session.get('risk_at') else now
+    carried = decayed(previous_risk, minutes_between(previous_at, now), settings['halfLifeMinutes'])
+    if event_risk <= carried + 1e-9:
+        return None, session
+
+    previous_level = level_of(carried, settings['thresholds'])
+    level = level_of(event_risk, settings['thresholds'])
+    # risk_at moves, but last_request_at doesn't, so a session isn't kept alive by the monitor
+    session.update(risk=round(event_risk, 4), risk_at=format_time(now), level=level)
+    feature_details = details_of(feature_scores, settings)
+    result = {
+        'risk': round(event_risk, 4),
+        'event_risk': round(event_risk, 4),
+        'previous_risk': round(previous_risk, 4),
+        'carried_risk': round(carried, 4),
+        'level': level,
+        'previous_level': previous_level,
+        'floor': floor_reason,
+        'step_up': step_up,
         'features': feature_details,
         'top_features': top_features(feature_details),
     }

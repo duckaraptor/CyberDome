@@ -301,7 +301,7 @@ All runtime data is in `data/` (git-ignored). Settings are in `policyConfigurati
 | `data/access_requests.jsonl` | Web UI, for every protected request | Trust Engine (access frequency) | The request records, one per line |
 | `data/audit.log` | Policy Engine, Web UI, Keycloak sync | `/logging` page, tests | Every access decision, one per line |
 | `data/known_devices.json` | Web UI, after an "allow" | Web UI (`new_device`) | The devices each user was allowed access from |
-| `data/events.json` | Home page and `/logging` (from Keycloak) | Event processing, audit sync | Keycloak's login events |
+| `data/events.json` | The monitor thread every 10 seconds, the home page and `/logging` (from Keycloak) | Event processing, audit sync | Keycloak's login events |
 | `data/auth_data.json` | Home page (event processing) | Trust Engine, Policy Engine | Login attempts and the sign-in success rate |
 | `data/user_data.json` | Home page (from Keycloak) | Trust Engine | Email verified, MFA, account creation time |
 | `data/keycloak_audit_state.json` | Audit sync | Audit sync | The newest Keycloak event already in the audit log |

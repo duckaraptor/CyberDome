@@ -113,7 +113,8 @@ def end_idle_sessions(sessions, profiles, now, idle_minutes=SESSION_IDLE_MINUTES
     now = model.parse_time(now)
     ended = []
     for session_id, session in list(sessions.items()):
-        last = model.parse_time(session.get('risk_at') or session['started_at'])
+        # The last request, not the last risk change: the monitor can change the risk without a request
+        last = model.parse_time(session.get('last_request_at') or session.get('risk_at') or session['started_at'])
         if model.minutes_between(last, now) < idle_minutes:
             continue
         user_id = session.get('user_id')

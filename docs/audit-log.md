@@ -16,6 +16,7 @@ Every decision, wherever it is made:
 | Web UI | Keycloak can't be reached to check the token (`503`) | `DENY` |
 | Web UI | The decision engines are down (`503`) or don't answer in time (`504`) | `DENY` |
 | Web UI | Adaptive mode: the session was ended after a CRITICAL risk (see `step-up.md`) | `RISK_ALERT` |
+| Risk Monitor | Adaptive mode: a session reached CRITICAL without a request and was ended (see `monitoring.md`) | `RISK_ALERT` |
 | Keycloak | A failed login, for example a wrong password (Keycloak's `LOGIN_ERROR` events) | `AUTHENTICATION_FAILURE` |
 
 The first four outcomes are the categories Task 1 asks for. Task 2 (adaptive mode) adds two:
@@ -123,7 +124,7 @@ The Policy Engine writes the entry first, and only then sends the decision to th
 
 ### Why failed logins come from Keycloak's events
 
-The login page belongs to Keycloak, so CyberDome never sees a wrong password itself. Keycloak records each failed login as a `LOGIN_ERROR` event. CyberDome already fetches these events for the trust score (login history). It copies new `LOGIN_ERROR` events into the audit log when it syncs events: when a user opens the home page, and when someone opens the `/logging` page. The entry's time is the time of the failed login, so these entries can appear a little later in the file than entries made at the same moment.
+The login page belongs to Keycloak, so CyberDome never sees a wrong password itself. Keycloak records each failed login as a `LOGIN_ERROR` event. CyberDome already fetches these events for the trust score (login history). It copies new `LOGIN_ERROR` events into the audit log when it syncs events: every 10 seconds in the monitor thread (Task 2, `monitoring.md`), and also when a user opens the home page or the `/logging` page. The entry's time is the time of the failed login, so these entries can appear a little later in the file than entries made at the same moment.
 
 ## The /logging page
 
@@ -143,4 +144,4 @@ The old `data/access_decision.json` and `data/access_requests.json` are no longe
 
 - **The log is a local file.** Someone with access to the machine could edit or delete it. A real system would send entries to a separate, write-only log server (for example a SIEM), or sign each entry.
 - **No rotation.** The file grows forever. A real system would start a new file every day or at a size limit.
-- **Failed logins arrive late.** They are copied in when the app syncs Keycloak's events, not at the moment they happen.
+- **Failed logins arrive a little late.** They are copied in when the app syncs Keycloak's events, not at the moment they happen. Since Task 2 step 4 the monitor thread syncs every 10 seconds. Before, it only happened when someone opened the home page or `/logging`.
