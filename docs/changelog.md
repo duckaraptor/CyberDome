@@ -2,6 +2,26 @@
 
 This file records the changes we make to CyberDome, newest first. For each fix we write what we saw, what was wrong and how we fixed it. Runtime-generated data is listed separately from intentional source and configuration changes.
 
+## 2026-11-14
+
+### Added: System A+MFA, the baseline for MFA prompts
+
+Branch: `feat-system-a-mfa`. The details are in the new `docs/system-a-mfa.md`.
+
+**What we saw:** our research question (Proposal 3) asks whether adaptive authentication asks for MFA less often without losing security. System A never asks for MFA, so comparing prompts with it says nothing: any number is more than zero.
+
+**What we changed:**
+
+- New `riskMode: static-mfa`. It runs Task 1's policies P1 to P5, then the new policy **M1 Admin MFA**, then P6 (`cyberdome/policy.py`). M1 asks for an OTP on an admin resource, unless MFA was used in this login (the token's `acr` is 2). So it asks once per session.
+- The prompt uses the step-up from Task 2 step 3, and is logged as `STEP_UP_REQUIRED` with `step_up: otp` and the `session_id` (`cyberdome/networking.py`), so prompts are counted the same way as in System B.
+- `risk_mode()` now knows three modes. `static_mfa` also works, and anything unknown still runs `static`.
+
+**Why once per session:** asking on every admin page would make System B look much better, but only because the baseline is unrealistic. Once per session is how most real systems do admin MFA, and it matches System B, where a passed step-up covers the rest of the session.
+
+**Why a separate branch:** Task 2 compares System A and System B. A+MFA is extra, for Proposal 3, and we agree its use with our supervisor.
+
+**Tests:** 142 unit tests pass (6 new in `tests/test_policies.py`). We also ran node 2 and node 3's message code in this mode: an admin page gave `STEP_UP_REQUIRED` by M1, with the trust score, `step_up: otp` and the session in the audit entry, and no risk fields.
+
 ## 2026-11-13
 
 ### Added: continuous monitoring and the /risk page (Task 2, step 4)

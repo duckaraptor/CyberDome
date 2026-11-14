@@ -297,6 +297,54 @@ def test_adaptive_context_rules_are_features_not_rules():
     assert_decision(run_adaptive(night, risk('LOW'), sign_in_success_rate=0.2), 'ALLOW', 'P6', 'ALLOW')
 
 
+# --- System A+MFA (riskMode: static-mfa) ------------------------------------------------
+#
+# The Task 1 policies, plus M1: an OTP once per session on admin resources.
+
+STATIC_MFA = dict(CONFIG, riskMode='static-mfa')
+
+
+def run_static_mfa(access_request, trust_score=0.9):
+    return decide(access_request, trust_score, None, 1.0, None, STATIC_MFA)
+
+
+def test_static_mfa_asks_for_an_otp_on_admin_resources():
+    result = run_static_mfa(request(roles=['Administrator'], resource='policy_configuration', acr='1', session_id='s-1'))
+    assert_decision(result, 'STEP_UP', 'M1', 'STEP_UP_REQUIRED')
+    assert result['step_up'] == 'otp' and result['session_id'] == 's-1'
+
+
+def test_static_mfa_once_per_session():
+    # MFA was used in this login (acr 2), so no new prompt
+    result = run_static_mfa(request(roles=['Administrator'], resource='policy_configuration', acr='2'))
+    assert_decision(result, 'ALLOW', 'P6', 'ALLOW')
+
+
+def test_static_mfa_leaves_normal_resources_alone():
+    assert_decision(run_static_mfa(request(acr='1')), 'ALLOW', 'P6', 'ALLOW')
+
+
+def test_static_mfa_denies_first():
+    # A request the Task 1 policies deny is denied, not asked for an OTP
+    admin = request(roles=['Administrator'], resource='policy_configuration', acr='1')
+    assert_decision(run_static_mfa(admin, trust_score=0.5), 'DENY', 'P4', 'DENY')
+    assert run_static_mfa(request(resource='policy_configuration', acr='1'))['policy_id'] == 'P2'
+
+
+def test_static_mfa_without_mfa_values_does_not_prompt():
+    config = dict(STATIC_MFA, riskModel={'mfaAcrValues': []})
+    admin = request(roles=['Administrator'], resource='policy_configuration', acr='1')
+    assert_decision(decide(admin, 0.9, None, 1.0, None, config), 'ALLOW', 'P6', 'ALLOW')
+
+
+def test_mode_names():
+    from cyberdome.policy import risk_mode
+    assert risk_mode({'riskMode': 'static_mfa'}) == 'static-mfa'
+    assert risk_mode({'riskMode': ' Adaptive '}) == 'adaptive'
+    assert risk_mode({'riskMode': 'mfa'}) == 'static'
+    assert risk_mode({}) == 'static'
+
+
 if __name__ == '__main__':
     tests = [(name, test) for name, test in sorted(globals().items()) if name.startswith('test_') and callable(test)]
     failed = 0

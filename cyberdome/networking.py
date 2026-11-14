@@ -278,7 +278,10 @@ class TrustEngineNode(Networking):
 
 def risk_audit_fields(risk, decision):
     # The audit entry's risk fields in adaptive mode. Static mode adds none, so its entries stay as in Task 1.
+    # static-mfa mode (System A+MFA) has no risk, but its M1 step-ups record the kind and the session.
     if not risk:
+        if decision.get('step_up'):
+            return {'step_up': decision['step_up'], 'session_id': decision.get('session_id')}
         return {}
     return {
         'session_id': risk.get('session_id'),

@@ -12,6 +12,9 @@ riskMode in policyConfiguration.yml chooses the set of policies:
     adaptive  (System B, Task 2)  P1, P2, R1, then P6. R1 chooses the response from the
                                   session's risk level: allow, OTP step-up, full step-up,
                                   or deny with an alert.
+    static-mfa (System A+MFA)     P1 to P5, M1, then P6. M1 asks for an OTP on admin
+                                  resources, once per session. The baseline for counting
+                                  MFA prompts (docs/system-a-mfa.md).
 
 The policies and the reasons behind them are explained in docs/policies.md.
 
@@ -26,7 +29,7 @@ from .trust_algorithm import config_time, is_in_night_window, DEFAULT_NIGHT_END,
 DEFAULT_ADMIN_MIN_TRUST_SCORE = 0.75
 DEFAULT_PRIVILEGED_ROLES = ['Administrator', 'Policy Administrator', 'Approver']
 DEFAULT_SIGN_IN_SUCCESS_THRESHOLD = 0.5
-RISK_MODES = ('static', 'adaptive')
+RISK_MODES = ('static', 'adaptive', 'static-mfa')
 
 
 # --- Helpers ---------------------------------------------------------------------
@@ -39,8 +42,9 @@ def number(value, default):
 
 
 def risk_mode(config):
-    # Anything other than 'adaptive' runs the Task 1 policies, so a typo can't switch the checks off
-    return 'adaptive' if str(config.get('riskMode', 'static')).strip().lower() == 'adaptive' else 'static'
+    # Anything unknown runs the Task 1 policies, so a typo can't switch the checks off
+    mode = str(config.get('riskMode', 'static')).strip().lower().replace('_', '-')
+    return mode if mode in RISK_MODES else 'static'
 
 
 def resource_entry(config, resource):
@@ -221,6 +225,31 @@ def decide_adaptive(facts):
             'reason': f"Role {', '.join(facts['request'].get('roles') or [])} may access {facts['request'].get('resource')}. {why}"}
 
 
+# --- M1 Admin MFA (static-mfa mode only, System A+MFA) -----------------------------------
+#
+# The baseline for counting MFA prompts (Proposal 3): Task 1's static policies, plus the
+# classic rule "admin pages need MFA". Once per session, like most real systems: if the
+# token shows MFA was used in this login (acr), no new prompt. That matches System B,
+# where a passed step-up covers the rest of the session, so the comparison is fair.
+
+def m1_admin_mfa(facts):
+    # None if the request may go on to P6, otherwise the step-up decision
+    if not facts['entry'].get('adminResource'):
+        return None
+    mfa_values = risk_settings(facts['config'])['mfaAcrValues']
+    if not mfa_values:
+        return None  # no acr value means MFA (OTP not set up), so the rule can't be checked: see docs/system-a-mfa.md
+    acr = facts['request'].get('acr')
+    if str(acr) in mfa_values:
+        return None
+    return {'decision': 'STEP_UP', 'access_decision': 0, 'policy_id': 'M1', 'policy_name': 'Admin MFA',
+            'outcome': 'STEP_UP_REQUIRED', 'step_up': 'otp',
+            # For the audit entry, so the experiments can count prompts per session
+            'session_id': facts['request'].get('session_id'),
+            'reason': (f"{facts['request'].get('resource')} is an admin resource, and MFA was not used in this login "
+                       f"(acr {acr if acr is not None else 'missing'}), so a one-time code (OTP) is needed once per session")}
+
+
 # --- The decision ------------------------------------------------------------------
 
 def decide(access_request, trust_score, trust_factors=None, sign_in_success_rate=None, trust_error=None, config=None,
@@ -243,7 +272,8 @@ def decide(access_request, trust_score, trust_factors=None, sign_in_success_rate
         'entry': resource_entry(config, access_request.get('resource')),
     }
 
-    if risk_mode(config) == 'adaptive':
+    mode = risk_mode(config)
+    if mode == 'adaptive':
         return decide_adaptive(facts)
 
     for policy_id, name, outcome, check in POLICIES:
@@ -251,6 +281,11 @@ def decide(access_request, trust_score, trust_factors=None, sign_in_success_rate
         if reason:
             return {'decision': 'DENY', 'access_decision': 0, 'policy_id': policy_id, 'policy_name': name,
                     'outcome': outcome, 'reason': reason}
+
+    if mode == 'static-mfa':
+        decision = m1_admin_mfa(facts)
+        if decision:
+            return decision
 
     minimum = number(facts['entry'].get('minTrustScore'), 0.0)
     return {'decision': 'ALLOW', 'access_decision': 1, 'policy_id': 'P6', 'policy_name': 'Permitted access',

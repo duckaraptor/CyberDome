@@ -61,8 +61,9 @@ In the first version of the policies, P2 only looked at the resource, and P3 nev
 | --- | --- | --- | --- |
 | `static` (default) | A, Task 1 | the trust score | P1, P2, P3, P4, P5, then P6 |
 | `adaptive` | B, Task 2 | the session's risk | P1, P2, R1, then P6 |
+| `static-mfa` | A+MFA, the baseline for MFA prompts (`system-a-mfa.md`) | the trust score | P1, P2, P3, P4, P5, M1 (OTP once per session on admin resources), then P6 |
 
-Any value other than `adaptive` (also a typo) runs the static policies, so a mistake in the file can't switch the checks off. Both modes use the same nodes, files and pages. Only the decision logic changes, so the experiments compare the logic and nothing else.
+Any unknown value (also a typo) runs the static policies, so a mistake in the file can't switch the checks off. All modes use the same nodes, files and pages. Only the decision logic changes, so the experiments compare the logic and nothing else.
 
 | Policy | Static | Adaptive | Why |
 | --- | --- | --- | --- |
